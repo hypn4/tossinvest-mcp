@@ -436,6 +436,14 @@ def test_candle_cache_evicts_oldest_series() -> None:
     assert c.get_candles("C", "1m") != []
 
 
+def test_candle_cache_calendar_ttl() -> None:
+    c = CandleCache(calendar_ttl=100.0)
+    c.set_calendar("US", {"today": {}}, now=1000.0)
+    assert c.get_calendar("US", now=1050.0) == {"today": {}}  # TTL 내
+    assert c.get_calendar("US", now=1101.0) is None  # 만료
+    assert c.get_calendar("KR", now=1050.0) is None  # 미설정
+
+
 # --- 마이크로구조 ---
 def test_microstructure_orderbook_and_flow() -> None:
     facts = summarize_microstructure(

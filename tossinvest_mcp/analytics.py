@@ -528,6 +528,15 @@ class CandleCache:
             self._candles.pop(next(iter(self._candles)))  # 가장 먼저 들어온 시리즈 폐기
         self._candles[key] = out
 
+    def get_calendar(self, market: str, now: float) -> Any | None:
+        hit = self._calendar.get(market)
+        if hit is not None and now - hit[1] < self._calendar_ttl:
+            return hit[0]
+        return None
+
+    def set_calendar(self, market: str, payload: Any, now: float) -> None:
+        self._calendar[market] = (payload, now)
+
 
 # --- fetch (httpx, 순수 계산과 분리) ------------------------------------------
 def _error_detail(resp: httpx.Response) -> str:
