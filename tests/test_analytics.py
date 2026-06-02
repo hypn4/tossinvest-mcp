@@ -575,9 +575,18 @@ async def test_fetch_candles_cached_reuses_history() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         before = req.url.params.get("before")
-        candles = page_b if before else page_a
-        return httpx.Response(
-            200, json={"result": {"candles": candles, "nextBefore": None}}
+        if before:  # 역방향: 과거 페이지 B, 더 이상 없음
+            return httpx.Response(
+                200, json={"result": {"candles": page_b, "nextBefore": None}}
+            )
+        return httpx.Response(  # 최신 페이지 A + 과거 커서
+            200,
+            json={
+                "result": {
+                    "candles": page_a,
+                    "nextBefore": "2026-06-02T10:00:00+09:00",
+                }
+            },
         )
 
     client = httpx.AsyncClient(

@@ -630,9 +630,12 @@ async def _fetch_candles_cached(
     lookback: int,
     cache: CandleCache,
 ) -> list[dict[str, Any]]:
-    """닫힌 봉은 캐시에서, 라이브 봉은 최신 페이지로 항상 신선하게. 부족분만 역방향 fetch."""
+    """닫힌 봉은 캐시에서, 라이브 봉은 최신 페이지로 항상 신선하게. 부족분만 역방향 fetch.
 
-    async def page(before: str | None) -> list[dict[str, Any]]:
+    역방향 페이지네이션은 무캐시 경로와 동일하게 API 의 nextBefore 커서를 사용한다.
+    """
+
+    async def page(before: str | None) -> tuple[list[dict[str, Any]], str | None]:
         params: dict[str, Any] = {
             "symbol": symbol,
             "interval": interval,
@@ -642,18 +645,20 @@ async def _fetch_candles_cached(
         if before:
             params["before"] = before
         res = await _result(client, "/api/v1/candles", params)
-        return parse_candles(res.get("candles", []) if isinstance(res, dict) else [])
+        if not isinstance(res, dict):
+            return [], None
+        return parse_candles(res.get("candles", [])), res.get("nextBefore")
 
-    fresh = await page(None)  # 최신 페이지 — 항상 신선
+    fresh, cursor = await page(None)  # 최신 페이지 — 항상 신선
     result, to_add, need_before = _merge_for_lookback(
         cache.get_candles(symbol, interval), fresh, lookback
     )
     if to_add:
         cache.extend_candles(symbol, interval, to_add)
     guard = 0
-    while need_before is not None and guard < _MAX_PAGES:
+    while need_before is not None and cursor and guard < _MAX_PAGES:
         guard += 1
-        older = await page(need_before)
+        older, cursor = await page(cursor)  # API nextBefore 커서로 과거 페이지
         if not older:
             break
         cache.extend_candles(symbol, interval, older)  # 과거 = 닫힘
