@@ -11,6 +11,9 @@ talipp(순수 파이썬, 의존성 0)로 표준 기술적 지표를 계산하고
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import sqlite3
 import time
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -34,6 +37,8 @@ from talipp.indicators import (
     VWAP,
 )
 from talipp.ohlcv import OHLCVFactory
+
+logger = logging.getLogger(__name__)
 
 _READ_ONLY = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
@@ -540,28 +545,153 @@ def summarize_microstructure(
     return facts
 
 
-# --- 인메모리 캐시 (rate-limit 완화; 닫힌 봉·캘린더만, 라이브는 항상 신선) ------
+# --- 캔들·캘린더 캐시 (rate-limit 완화; 닫힌 봉·캘린더만, 라이브는 항상 신선) ------
+# 기본은 인메모리 dict(휘발성). db_path 설정 시 SQLite 파일에 영속(opt-in, 아래 CandleCache).
 _MAX_PAGES = 10  # 캐시 역방향 페이지네이션 가드(200*10=2000봉)
+_CANDLE_RETENTION = 7 * 86400.0  # 디스크 보존창(초). 이보다 오래 미재조회된 봉은 prune.
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS candles(
+  symbol TEXT, interval TEXT, timestamp TEXT,
+  open REAL, high REAL, low REAL, close REAL, volume REAL, fetched_at REAL,
+  PRIMARY KEY (symbol, interval, timestamp)
+);
+CREATE TABLE IF NOT EXISTS calendar(market TEXT PRIMARY KEY, payload TEXT, fetched_at REAL);
+"""
 
 
-class CandleCache:
-    """확정(닫힌) 캔들과 시장 캘린더의 인메모리 캐시(서버 수명 1개).
+class _SqliteStore:
+    """닫힌 봉·캘린더의 SQLite 영속 저장소(stdlib sqlite3, 의존성 0).
 
-    닫힌 봉은 불변이라 누적 보관하고, 라이브 봉은 캐시하지 않는다(호출자가 매번 신선
-    fetch). 캘린더는 market 별 TTL. 단일 사용자 세션 기준이라 동시성 보호는 두지 않는다.
+    CandleCache 의 파일 모드에서만 쓰인다. 동기 호출·단일 장수 연결이며 모든 SQL/직렬화/prune
+    를 여기 가둔다(파일 모드 신규 실패 모드 격리). 손상 파일이면 __init__ 에서 예외 → 호출자 폴백.
     """
 
     def __init__(
-        self, max_bars: int = 2000, max_series: int = 64, calendar_ttl: float = 1800.0
+        self, db_path: str, retention_seconds: float = _CANDLE_RETENTION
+    ) -> None:
+        self._conn = sqlite3.connect(db_path)
+        self._conn.execute("PRAGMA journal_mode=WAL")  # 다중 프로세스(여러 세션) 공존
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.executescript(_SCHEMA)  # 손상 파일이면 여기서 예외
+        self._retention = retention_seconds
+
+    def load_candles(self, symbol: str, interval: str) -> list[dict[str, Any]]:
+        cur = self._conn.execute(
+            "SELECT timestamp, open, high, low, close, volume FROM candles "
+            "WHERE symbol=? AND interval=? ORDER BY timestamp",
+            (symbol, interval),
+        )
+        return [
+            {
+                "timestamp": r[0],
+                "open": r[1],
+                "high": r[2],
+                "low": r[3],
+                "close": r[4],
+                "volume": r[5],
+            }
+            for r in cur.fetchall()
+        ]
+
+    def upsert_candles(
+        self, symbol: str, interval: str, bars: list[dict[str, Any]], now: float
+    ) -> None:
+        self._conn.executemany(
+            "INSERT INTO candles(symbol,interval,timestamp,open,high,low,close,volume,fetched_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol,interval,timestamp) DO UPDATE SET "
+            "open=excluded.open, high=excluded.high, low=excluded.low, "
+            "close=excluded.close, volume=excluded.volume, fetched_at=excluded.fetched_at",
+            [
+                (
+                    symbol,
+                    interval,
+                    b["timestamp"],
+                    b["open"],
+                    b["high"],
+                    b["low"],
+                    b["close"],
+                    b["volume"],
+                    now,
+                )
+                for b in bars
+            ],
+        )
+        # 절대 기준 prune(상대 축출 금지 — 다중 프로세스 경합 회피)
+        self._conn.execute(
+            "DELETE FROM candles WHERE fetched_at < ?", (now - self._retention,)
+        )
+        self._conn.commit()
+
+    def delete_series(self, symbol: str, interval: str) -> None:
+        self._conn.execute(
+            "DELETE FROM candles WHERE symbol=? AND interval=?", (symbol, interval)
+        )
+        self._conn.commit()
+
+    def load_calendar(self, market: str) -> tuple[Any, float] | None:
+        cur = self._conn.execute(
+            "SELECT payload, fetched_at FROM calendar WHERE market=?", (market,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return json.loads(row[0]), row[1]
+
+    def save_calendar(self, market: str, payload: Any, now: float) -> None:
+        self._conn.execute(
+            "INSERT INTO calendar(market,payload,fetched_at) VALUES(?,?,?) "
+            "ON CONFLICT(market) DO UPDATE SET payload=excluded.payload, "
+            "fetched_at=excluded.fetched_at",
+            (market, json.dumps(payload), now),
+        )
+        self._conn.commit()
+
+
+class CandleCache:
+    """확정(닫힌) 캔들과 시장 캘린더의 캐시(서버 수명 1개).
+
+    닫힌 봉은 불변이라 누적 보관하고, 라이브 봉은 캐시하지 않는다(호출자가 매번 신선
+    fetch). 캘린더는 market 별 TTL. 단일 사용자 세션 기준이라 동시성 보호는 두지 않는다.
+
+    기본은 인메모리 dict(휘발성, 현행). db_path 가 주어지면(opt-in) 닫힌 봉·캘린더를 SQLite
+    파일에 write-through 하고 최초 접근 시 로드해 재시작 후에도 재사용한다. dict 가 인프로세스
+    단일 진실원(핫 패스)이고 SQLite 는 영속 사이드카다. 연결/스키마 실패·손상 시 로그 후 인메모리로
+    폴백한다(분석은 절대 막지 않음). 캘린더 TTL 은 wall-clock(`now` 주입) 기준이라 재시작 후에도 유효.
+    """
+
+    def __init__(
+        self,
+        max_bars: int = 2000,
+        max_series: int = 64,
+        calendar_ttl: float = 1800.0,
+        db_path: str | None = None,
+        retention_seconds: float = _CANDLE_RETENTION,
     ) -> None:
         self._candles: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._calendar: dict[str, tuple[Any, float]] = {}
         self._max_bars = max_bars
         self._max_series = max_series
         self._calendar_ttl = calendar_ttl
+        self._store: _SqliteStore | None = None
+        if db_path is not None:
+            try:
+                self._store = _SqliteStore(db_path, retention_seconds)
+            except Exception as exc:  # 손상·권한 등 → 인메모리 폴백
+                logger.warning("캔들 캐시 SQLite 비활성(인메모리 폴백): %s", exc)
+                self._store = None
 
     def get_candles(self, symbol: str, interval: str) -> list[dict[str, Any]]:
-        return self._candles.get((symbol, interval), [])
+        key = (symbol, interval)
+        if key not in self._candles and self._store is not None:
+            try:
+                loaded = self._store.load_candles(symbol, interval)
+            except Exception as exc:
+                logger.warning("캔들 캐시 로드 실패(%s/%s): %s", symbol, interval, exc)
+                loaded = []
+            if loaded:
+                self._candles[key] = loaded[-self._max_bars :]
+        return self._candles.get(key, [])
 
     def extend_candles(
         self, symbol: str, interval: str, bars: list[dict[str, Any]]
@@ -576,15 +706,44 @@ class CandleCache:
         if key not in self._candles and len(self._candles) >= self._max_series:
             self._candles.pop(next(iter(self._candles)))  # 가장 먼저 들어온 시리즈 폐기
         self._candles[key] = out
+        if self._store is not None and bars:
+            try:
+                self._store.upsert_candles(symbol, interval, bars, time.time())
+            except Exception as exc:  # 영속 실패는 비치명(인메모리는 이미 갱신됨)
+                logger.warning("캔들 캐시 영속 실패(%s/%s): %s", symbol, interval, exc)
+
+    def invalidate(self, symbol: str, interval: str) -> None:
+        """해당 시리즈를 인메모리·디스크에서 폐기(조정가격 재조정 감지 시)."""
+        self._candles.pop((symbol, interval), None)
+        if self._store is not None:
+            try:
+                self._store.delete_series(symbol, interval)
+            except Exception as exc:
+                logger.warning(
+                    "캔들 캐시 무효화 실패(%s/%s): %s", symbol, interval, exc
+                )
 
     def get_calendar(self, market: str, now: float) -> Any | None:
         hit = self._calendar.get(market)
+        if hit is None and self._store is not None:
+            try:
+                hit = self._store.load_calendar(market)
+            except Exception as exc:
+                logger.warning("캘린더 캐시 로드 실패(%s): %s", market, exc)
+                hit = None
+            if hit is not None:
+                self._calendar[market] = hit
         if hit is not None and now - hit[1] < self._calendar_ttl:
             return hit[0]
         return None
 
     def set_calendar(self, market: str, payload: Any, now: float) -> None:
         self._calendar[market] = (payload, now)
+        if self._store is not None:
+            try:
+                self._store.save_calendar(market, payload, now)
+            except Exception as exc:
+                logger.warning("캘린더 캐시 영속 실패(%s): %s", market, exc)
 
 
 def _merge_for_lookback(
@@ -612,6 +771,30 @@ def _merge_for_lookback(
         available[0]["timestamp"] if available and len(available) < lookback else None
     )
     return result, closed_to_add, need_before
+
+
+def _overlap_consistent(
+    cached_closed: list[dict[str, Any]], fresh_page: list[dict[str, Any]]
+) -> bool | None:
+    """캐시된 닫힌 봉과 방금 받은 최신 페이지에서 '겹치는 가장 최근 봉'의 OHLC 일치 여부.
+
+    조정가격(split/dividend) 소급 재조정 감지용. True=겹침+일치(조정 기준 동일 → 캐시 신뢰),
+    False=겹침+불일치(재조정 → 캐시 폐기), None=겹침 없음(검증 불가, 보통 교차일 갭 → 캐시 폐기).
+    순수 함수. 영속 캐시가 조정 전 옛 봉을 새 조정 최신 페이지와 병합해 지표를 오염시키는 것을 막는다.
+    """
+    if not cached_closed or not fresh_page:
+        return None
+    fresh_by_ts = {c["timestamp"]: c for c in fresh_page}
+    for c in reversed(cached_closed):
+        f = fresh_by_ts.get(c["timestamp"])
+        if f is not None:
+            return (
+                c["open"] == f["open"]
+                and c["high"] == f["high"]
+                and c["low"] == f["low"]
+                and c["close"] == f["close"]
+            )
+    return None
 
 
 # --- fetch (httpx, 순수 계산과 분리) ------------------------------------------
@@ -701,9 +884,12 @@ async def _fetch_candles_cached(
         return parse_candles(res.get("candles", [])), res.get("nextBefore")
 
     fresh, cursor = await page(None)  # 최신 페이지 — 항상 신선
-    result, to_add, need_before = _merge_for_lookback(
-        cache.get_candles(symbol, interval), fresh, lookback
-    )
+    cached = cache.get_candles(symbol, interval)
+    if cached and _overlap_consistent(cached, fresh) is not True:
+        # 조정가격 재조정(가격 불연속) 또는 검증 불가(겹침 없음) → 캐시 폐기 후 fresh 기준 재구성
+        cache.invalidate(symbol, interval)
+        cached = []
+    result, to_add, need_before = _merge_for_lookback(cached, fresh, lookback)
     if to_add:
         cache.extend_candles(symbol, interval, to_add)
     guard = 0
@@ -733,7 +919,9 @@ async def _session_anchor(
     """
     if not candles or symbol.isdigit():  # KR 6자리 숫자는 갭 휴리스틱
         return None, None, None, None
-    now = time.monotonic()
+    now = (
+        time.time()
+    )  # wall-clock(캘린더 TTL은 재시작 후에도 유효해야 하므로 monotonic 아님)
     cal = cache.get_calendar("US", now) if cache is not None else None
     if cal is None:
         try:
@@ -751,9 +939,14 @@ async def _session_anchor(
 
 
 # --- 등록 --------------------------------------------------------------------
-def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
-    """계산형 분석 툴을 서버에 등록한다(모두 읽기 전용, 항상 노출)."""
-    cache = CandleCache()
+def register_analytics(
+    mcp: FastMCP, client: httpx.AsyncClient, db_path: str | None = None
+) -> None:
+    """계산형 분석 툴을 서버에 등록한다(모두 읽기 전용, 항상 노출).
+
+    db_path 가 주어지면 캔들·캘린더 캐시를 SQLite 파일에 영속한다(opt-in, rate-limit 완화).
+    """
+    cache = CandleCache(db_path=db_path)
 
     @mcp.tool(annotations=_READ_ONLY)
     async def analyze_indicators(

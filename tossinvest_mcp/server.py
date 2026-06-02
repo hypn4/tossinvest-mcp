@@ -120,5 +120,7 @@ def build_server(
         validate_output=validate_output,
     )
     register_prompts(mcp)
-    register_analytics(mcp, client)
+    register_analytics(
+        mcp, client, db_path=settings.cache_db_path if settings else None
+    )
     return mcp

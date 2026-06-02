@@ -60,3 +60,10 @@ class Settings(BaseSettings):
         default="INFO",
         description="로그 레벨(DEBUG/INFO/WARNING/ERROR). 로그는 stderr 로 출력된다.",
     )
+
+    # --- 캐시 ---
+    cache_db_path: str | None = Field(
+        default=None,
+        description="설정 시 닫힌 봉·시장 캘린더를 SQLite 파일에 보존해 서버 재시작 후에도 재사용한다"
+        "(rate-limit 완화). 미설정이면 인메모리(세션 한정, 현행). 토큰 사용량과는 무관.",
+    )

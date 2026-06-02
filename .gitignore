@@ -20,3 +20,8 @@ graphify-out/
 
 # 설계 문서(브레인스토밍 스펙 — 로컬 전용)
 docs/superpowers/
+
+# SQLite 영속 캔들 캐시(TOSS_CACHE_DB_PATH — 로컬 전용)
+*.db
+*.db-wal
+*.db-shm

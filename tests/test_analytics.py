@@ -1257,3 +1257,142 @@ async def test_intraday_vwap_empty_selected_session_consistent_shape() -> None:
     assert d["session_complete"] is False
     assert d["in_progress"] is False
     assert d["note"] == "선택 세션에 봉 없음(윈도 밖)"
+
+
+# --- SQLite 영속 캐시 (opt-in 파일 모드) ---
+def _cbar(ts: str, close: float = 10.0) -> dict[str, Any]:
+    return {
+        "timestamp": ts,
+        "open": 10.0,
+        "high": 11.0,
+        "low": 9.0,
+        "close": close,
+        "volume": 100.0,
+    }
+
+
+def test_candle_cache_persists_closed_bars_across_instances(tmp_path: Any) -> None:
+    db = str(tmp_path / "c.db")
+    bars = [_cbar(f"2026-06-02T22:3{i}:00+09:00", close=10.0 + i) for i in range(3)]
+    c1 = CandleCache(db_path=db)
+    c1.extend_candles("AAPL", "1m", bars)
+    c2 = CandleCache(db_path=db)  # 재시작 시뮬 — 디스크에서 로드
+    assert c2.get_candles("AAPL", "1m") == bars
+
+
+def test_candle_cache_db_none_stays_pure_dict() -> None:
+    c1 = CandleCache()
+    c1.extend_candles("AAPL", "1m", [_cbar("2026-06-02T22:30:00+09:00")])
+    assert CandleCache().get_candles("AAPL", "1m") == []  # 인메모리 → 영속 안 됨
+
+
+def test_candle_cache_calendar_persists_with_wall_clock_ttl(tmp_path: Any) -> None:
+    db = str(tmp_path / "c.db")
+    CandleCache(db_path=db, calendar_ttl=100.0).set_calendar(
+        "US", {"today": {"x": 1}}, now=1000.0
+    )
+    c2 = CandleCache(db_path=db, calendar_ttl=100.0)
+    assert c2.get_calendar("US", now=1050.0) == {
+        "today": {"x": 1}
+    }  # TTL 내, 디스크 로드
+    assert c2.get_calendar("US", now=1200.0) is None  # TTL 만료
+
+
+def test_candle_cache_invalidate_clears_disk(tmp_path: Any) -> None:
+    db = str(tmp_path / "c.db")
+    c = CandleCache(db_path=db)
+    c.extend_candles("AAPL", "1m", [_cbar("2026-06-02T22:30:00+09:00")])
+    c.invalidate("AAPL", "1m")
+    assert CandleCache(db_path=db).get_candles("AAPL", "1m") == []
+
+
+def test_candle_cache_corrupt_db_falls_back_to_memory(tmp_path: Any) -> None:
+    db = tmp_path / "c.db"
+    db.write_text("not a sqlite database")
+    c = CandleCache(db_path=str(db))  # 예외 없이 dict 폴백
+    c.extend_candles("AAPL", "1m", [_cbar("2026-06-02T22:30:00+09:00")])
+    assert len(c.get_candles("AAPL", "1m")) == 1  # 인메모리로 정상 동작
+
+
+def test_sqlite_store_prunes_by_retention(tmp_path: Any) -> None:
+    from tossinvest_mcp.analytics import _SqliteStore
+
+    s = _SqliteStore(str(tmp_path / "c.db"), retention_seconds=10.0)
+    s.upsert_candles("AAPL", "1m", [_cbar("t_old")], now=1000.0)
+    s.upsert_candles(
+        "AAPL", "1m", [_cbar("t_new")], now=1100.0
+    )  # fetched_at<1090 prune
+    assert [b["timestamp"] for b in s.load_candles("AAPL", "1m")] == ["t_new"]
+
+
+def test_overlap_consistent_detects_readjustment() -> None:
+    from tossinvest_mcp.analytics import _overlap_consistent
+
+    cached = [_cbar("t1", close=10.0), _cbar("t2", close=20.0)]
+    assert _overlap_consistent(cached, [_cbar("t2", close=20.0), _cbar("t3")]) is True
+    assert _overlap_consistent(cached, [_cbar("t2", close=999.0), _cbar("t3")]) is False
+    assert _overlap_consistent(cached, [_cbar("t9"), _cbar("t10")]) is None
+    assert _overlap_consistent([], [_cbar("t2")]) is None
+
+
+async def test_fetch_candles_cached_invalidates_on_readjustment(tmp_path: Any) -> None:
+    from tossinvest_mcp.analytics import _fetch_candles_cached
+
+    db = str(tmp_path / "c.db")
+    stale = CandleCache(db_path=db)  # 이전 세션이 저장한(조정 전, close=10) 봉
+    stale.extend_candles(
+        "AAPL",
+        "1m",
+        [
+            _cbar("2026-06-02T22:30:00+09:00", close=10.0),
+            _cbar("2026-06-02T22:31:00+09:00", close=10.0),
+        ],
+    )
+    cache = CandleCache(db_path=db)  # 새 세션 — 디스크에서 로드
+
+    def row(ts: str) -> dict[str, Any]:
+        return {
+            "timestamp": ts,
+            "openPrice": "5",
+            "highPrice": "5",
+            "lowPrice": "5",
+            "closePrice": "5",
+            "volume": "100",
+        }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.params.get("before"):  # 역방향
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "candles": [row("2026-06-02T22:29:00+09:00")],
+                        "nextBefore": None,
+                    }
+                },
+            )
+        # 최신 페이지 — 같은 ts 를 재조정값(close 5, 저장된 10과 불일치)으로 + 라이브봉
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "candles": [
+                        row("2026-06-02T22:31:00+09:00"),
+                        row("2026-06-02T22:32:00+09:00"),
+                    ],
+                    "nextBefore": "cur",
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await _fetch_candles_cached(client, "AAPL", "1m", 3, cache)
+    finally:
+        await client.aclose()
+    closes = [b["close"] for b in result]
+    assert 10.0 not in closes  # 재조정 감지 → 조정 전(10) 폐기
+    assert all(c == 5.0 for c in closes)  # fresh 조정값만
