@@ -424,6 +424,18 @@ def test_candle_cache_empty_key_returns_list() -> None:
     assert CandleCache().get_candles("NONE", "1m") == []
 
 
+def test_candle_cache_evicts_oldest_series() -> None:
+    c = CandleCache(max_series=2)
+    c.extend_candles("A", "1m", [_bar("2026-06-02T10:00:00+09:00")])
+    c.extend_candles("B", "1m", [_bar("2026-06-02T10:00:00+09:00")])
+    c.extend_candles(
+        "C", "1m", [_bar("2026-06-02T10:00:00+09:00")]
+    )  # 새 시리즈 → 가장 오래된 A 폐기
+    assert c.get_candles("A", "1m") == []
+    assert c.get_candles("B", "1m") != []
+    assert c.get_candles("C", "1m") != []
+
+
 # --- 마이크로구조 ---
 def test_microstructure_orderbook_and_flow() -> None:
     facts = summarize_microstructure(
