@@ -1396,3 +1396,65 @@ async def test_fetch_candles_cached_invalidates_on_readjustment(tmp_path: Any) -
     closes = [b["close"] for b in result]
     assert 10.0 not in closes  # 재조정 감지 → 조정 전(10) 폐기
     assert all(c == 5.0 for c in closes)  # fresh 조정값만
+
+
+async def test_fetch_candles_cached_invalidates_on_no_overlap_in_memory() -> None:
+    # 인메모리(db_path 없음) 경로에서도, 캐시와 최신 페이지가 겹치지 않으면(예: 같은 세션
+    # 내 >3.3h 뒤 재조회) 가드가 캐시를 폐기하고 fresh 기준 연속 윈도로 재구성한다.
+    from tossinvest_mcp.analytics import _fetch_candles_cached
+
+    cache = CandleCache()  # 인메모리
+    cache.extend_candles(
+        "AAPL",
+        "1m",
+        [
+            _cbar("2026-06-03T09:30:00+09:00", close=10.0),
+            _cbar("2026-06-03T09:31:00+09:00", close=10.0),
+        ],
+    )
+
+    def row(ts: str) -> dict[str, Any]:
+        return {
+            "timestamp": ts,
+            "openPrice": "5",
+            "highPrice": "5",
+            "lowPrice": "5",
+            "closePrice": "5",
+            "volume": "100",
+        }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.params.get("before"):
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "candles": [row("2026-06-03T13:58:00+09:00")],
+                        "nextBefore": None,
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "candles": [
+                        row("2026-06-03T13:59:00+09:00"),
+                        row("2026-06-03T14:00:00+09:00"),
+                    ],
+                    "nextBefore": "cur",
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await _fetch_candles_cached(client, "AAPL", "1m", 3, cache)
+    finally:
+        await client.aclose()
+    ts = [b["timestamp"] for b in result]
+    assert "2026-06-03T09:30:00+09:00" not in ts  # 겹침 없는 아침 봉 폐기
+    assert all("T13:" in t or "T14:" in t for t in ts)  # fresh 기준 연속
