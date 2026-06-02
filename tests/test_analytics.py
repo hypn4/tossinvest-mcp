@@ -411,6 +411,44 @@ def test_session_context_flags_incomplete_when_window_misses_open() -> None:
     assert ctx["session_complete"] is False
 
 
+def test_select_session_end_bound_excludes_after_session() -> None:
+    # 결함 A: 정규장 [22:30,05:00) 윈도가 종료(05:00) 이후 애프터마켓 봉을 제외
+    reg = [
+        {"timestamp": f"2026-06-02T23:0{i}:00+09:00", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100.0}
+        for i in range(2)
+    ]
+    after = [{"timestamp": "2026-06-03T05:30:00+09:00", "open": 10.0, "high": 99.0, "low": 1.0, "close": 10.0, "volume": 100.0}]
+    ctx = session_context(reg + after, session_start="2026-06-02T22:30:00+09:00", session_end="2026-06-03T05:00:00+09:00")
+    assert ctx is not None
+    assert ctx["bars_in_session"] == 2  # 애프터 봉 제외
+    assert ctx["session_high"] == 11.0  # 99(애프터) 아님
+
+
+def test_select_session_blend_fix_excludes_prev_regular() -> None:
+    # 결함 B: 데이마켓 [09:00,17:00) 선택 시 전일 정규장 봉 미포함
+    prev_reg = [{"timestamp": "2026-06-02T23:00:00+09:00", "open": 10.0, "high": 88.0, "low": 1.0, "close": 10.0, "volume": 100.0}]
+    day = [
+        {"timestamp": f"2026-06-03T10:0{i}:00+09:00", "open": 10.0, "high": 12.0 + i, "low": 9.0, "close": 10.0, "volume": 100.0}
+        for i in range(2)
+    ]
+    ctx = session_context(prev_reg + day, session_start="2026-06-03T09:00:00+09:00", session_end="2026-06-03T17:00:00+09:00")
+    assert ctx is not None
+    assert ctx["bars_in_session"] == 2
+    assert ctx["session_high"] == 13.0  # 88(전일 정규장) 아님
+
+
+def test_select_session_end_none_keeps_legacy_behavior() -> None:
+    # session_end 미지정 → 현행(상한 없음) 동작 유지(후방호환)
+    reg = [
+        {"timestamp": f"2026-06-02T23:0{i}:00+09:00", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100.0}
+        for i in range(2)
+    ]
+    after = [{"timestamp": "2026-06-03T05:30:00+09:00", "open": 10.0, "high": 99.0, "low": 1.0, "close": 10.0, "volume": 100.0}]
+    ctx = session_context(reg + after, session_start="2026-06-02T22:30:00+09:00")
+    assert ctx is not None
+    assert ctx["bars_in_session"] == 3  # 상한 없음 → 애프터 포함(현행)
+
+
 def test_compute_vwap_calendar_anchor_uses_regular_only() -> None:
     pre = [
         {

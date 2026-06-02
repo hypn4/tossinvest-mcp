@@ -337,18 +337,25 @@ def _session_bars(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _select_session(
-    candles: list[dict[str, Any]], session_start: str | None = None
+    candles: list[dict[str, Any]],
+    session_start: str | None = None,
+    session_end: str | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """(세션 봉, 세션 시작 관측 여부)를 반환한다.
 
-    session_start(ISO) 가 주어지면 그 시각 이후 봉으로 앵커(US 정규장 캘린더 기준),
-    없으면 _session_bars 갭 휴리스틱(KR 등). 두 번째 값(complete)은 세션 시작이 데이터
-    안에서 실제 관측됐는지로, False 면 윈도가 세션 일부만 덮어 고저가 불완전함을 뜻한다
-    (조용한 잘림을 막는 플래그).
+    session_start(ISO) 가 주어지면 [session_start, session_end) 구간 봉으로 앵커(US 세션 캘린더
+    기준; session_end=None 이면 상한 없음). 없으면 _session_bars 갭 휴리스틱(KR 등). complete=False 면
+    윈도가 세션 시작까지 못 닿아 고저가 불완전함을 뜻한다(조용한 잘림 방지 플래그).
     """
     if session_start is not None:
         start = _parse_ts(session_start)
-        session = [c for c in candles if _parse_ts(c["timestamp"]) >= start]
+        end = _parse_ts(session_end) if session_end is not None else None
+        session = [
+            c
+            for c in candles
+            if _parse_ts(c["timestamp"]) >= start
+            and (end is None or _parse_ts(c["timestamp"]) < end)
+        ]
         complete = bool(candles) and _parse_ts(candles[0]["timestamp"]) <= start
         return session, complete
     session = _session_bars(candles)
@@ -405,11 +412,13 @@ def _resolve_session(
 
 
 def compute_vwap(
-    candles: list[dict[str, Any]], session_start: str | None = None
+    candles: list[dict[str, Any]],
+    session_start: str | None = None,
+    session_end: str | None = None,
 ) -> dict[str, Any] | None:
     if not candles:
         return None
-    session, complete = _select_session(candles, session_start)
+    session, complete = _select_session(candles, session_start, session_end)
     if not session:
         return None
     vwap = _last(list(VWAP(input_values=_ohlcv(session))))
@@ -425,18 +434,21 @@ def compute_vwap(
 
 
 def session_context(
-    candles: list[dict[str, Any]], session_start: str | None = None
+    candles: list[dict[str, Any]],
+    session_start: str | None = None,
+    session_end: str | None = None,
 ) -> dict[str, Any] | None:
     """현재 세션 봉만으로 장중 고저·세션 시작을 요약한다(1분봉 지표 대시보드 보강).
 
     session_start 가 주어지면 그 이후(US 정규장 캘린더 앵커), 없으면 갭 휴리스틱(KR).
+    session_end(ISO) 가 주어지면 [session_start, session_end) 구간으로 앵커(상한 없으면 현행).
     롤링 윈도 기준 range.period_high/low 와 달리 여기 고저는 당일 세션 실제 고저라,
     윈도가 세션 일부만 덮어도 장중 극단값을 놓치지 않는다. session_complete=False 면
     윈도가 세션 시작까지 못 닿아 고저가 불완전하다는 뜻.
     """
     if not candles:
         return None
-    session, complete = _select_session(candles, session_start)
+    session, complete = _select_session(candles, session_start, session_end)
     if not session:
         return None
     return {
