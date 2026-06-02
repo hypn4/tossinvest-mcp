@@ -45,12 +45,16 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # 이전 태그까지의 커밋 이력 필요
-      # Conventional Commits 를 릴리스 노트로 변환(커스텀 설정 없이 내장 keepachangelog 프리셋)
+      # Conventional Commits 를 릴리스 노트로 변환(커스텀 설정 없이 내장 github 프리셋).
+      # github 프리셋은 항목마다 작성자(by @username)·신규 기여자를 포함한다.
+      # GITHUB_TOKEN 으로 GitHub 연동(작성자·PR 해석)을 활성화한다.
       - uses: orhun/git-cliff-action@v4
         id: changelog
         with:
-          config: keepachangelog
+          config: github
           args: --latest --strip header
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/download-artifact@v8
         with:
           name: dist
