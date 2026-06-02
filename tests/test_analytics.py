@@ -609,6 +609,101 @@ async def test_fetch_candles_cached_reuses_history() -> None:
     assert [b["timestamp"] for b in r1] == [b["timestamp"] for b in r2]  # 동일 결과
 
 
+async def test_fetch_candles_cached_refreshes_live_bar() -> None:
+    from tossinvest_mcp.analytics import _fetch_candles_cached
+
+    state = {"close": "100"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.params.get("before"):
+            return httpx.Response(
+                200, json={"result": {"candles": [], "nextBefore": None}}
+            )
+        candles = [
+            {
+                "timestamp": "2026-06-02T10:00:00+09:00",
+                "openPrice": "1",
+                "highPrice": "1",
+                "lowPrice": "1",
+                "closePrice": "1",
+                "volume": "1",
+            },
+            {
+                "timestamp": "2026-06-02T10:01:00+09:00",
+                "openPrice": "1",
+                "highPrice": "1",
+                "lowPrice": "1",
+                "closePrice": state["close"],
+                "volume": "1",
+            },  # 라이브 봉
+        ]
+        return httpx.Response(
+            200, json={"result": {"candles": candles, "nextBefore": None}}
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    cache = CandleCache()
+    try:
+        r1 = await _fetch_candles_cached(client, "AAPL", "1m", 2, cache)
+        state["close"] = "200"  # 라이브 봉 가격 변동
+        r2 = await _fetch_candles_cached(client, "AAPL", "1m", 2, cache)
+    finally:
+        await client.aclose()
+
+    assert r1[-1]["close"] == 100.0
+    assert r2[-1]["close"] == 200.0  # 라이브 봉은 매번 신선 — 캐시 stale 아님
+
+
+async def test_fetch_candles_cached_grows_lookback_across_calls() -> None:
+    from tossinvest_mcp.analytics import _fetch_candles_cached
+
+    def day(d: int) -> str:
+        return f"2026-06-{d:02d}T00:00:00+09:00"
+
+    def row(d: int) -> dict[str, Any]:
+        return {
+            "timestamp": day(d),
+            "openPrice": "1",
+            "highPrice": "1",
+            "lowPrice": "1",
+            "closePrice": "1",
+            "volume": "1",
+        }
+
+    page_a = [row(d) for d in range(10, 15)]  # 06-10..06-14 (최신, 끝=라이브)
+    page_b = [row(d) for d in range(5, 10)]  # 06-05..06-09 (과거)
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if req.url.params.get("before"):
+            return httpx.Response(
+                200, json={"result": {"candles": page_b, "nextBefore": None}}
+            )
+        return httpx.Response(
+            200, json={"result": {"candles": page_a, "nextBefore": day(10)}}
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    cache = CandleCache()
+    try:
+        small = await _fetch_candles_cached(client, "AAPL", "1d", 3, cache)
+        n_small = calls["n"]
+        large = await _fetch_candles_cached(client, "AAPL", "1d", 8, cache)
+        n_large = calls["n"] - n_small
+    finally:
+        await client.aclose()
+
+    assert len(small) == 3 and n_small == 1  # 최신 페이지로 충분
+    assert len(large) == 8 and n_large == 2  # 최신 1 + 역방향 1(과거 보충)
+
+
 async def test_regular_session_start_caches_calendar() -> None:
     from tossinvest_mcp.analytics import _regular_session_start
 

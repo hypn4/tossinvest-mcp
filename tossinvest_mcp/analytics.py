@@ -634,6 +634,8 @@ async def _fetch_candles_cached(
     """닫힌 봉은 캐시에서, 라이브 봉은 최신 페이지로 항상 신선하게. 부족분만 역방향 fetch.
 
     역방향 페이지네이션은 무캐시 경로와 동일하게 API 의 nextBefore 커서를 사용한다.
+    정상 응답에서는 무캐시 경로와 동일한 닫힌 봉을 돌려준다. 단 API 가 결측 OHLCV(파싱 탈락) 봉을
+    섞어 줄 때만, 무캐시(원시 행 수 기준)와 캐시(파싱 유효 봉 수 기준)의 정지 조건이 달라질 수 있다.
     """
 
     async def page(before: str | None) -> tuple[list[dict[str, Any]], str | None]:
