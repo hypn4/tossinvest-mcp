@@ -847,6 +847,67 @@ async def test_regular_session_start_caches_calendar() -> None:
     assert cal_calls["n"] == 1  # 2번째는 캐시 사용
 
 
+async def test_session_anchor_kr_returns_none() -> None:
+    from tossinvest_mcp.analytics import _session_anchor
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise AssertionError("KR 은 캘린더를 호출하지 않아야 한다")
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+    )
+    try:
+        out = await _session_anchor(client, "005930", [_bar("2026-06-03T10:00:00+09:00")], "auto")
+    finally:
+        await client.aclose()
+    assert out == (None, None, None, None)
+
+
+async def test_session_anchor_us_resolves_and_caches() -> None:
+    from tossinvest_mcp.analytics import _session_anchor
+
+    cal_calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        cal_calls["n"] += 1
+        return httpx.Response(200, json={"result": _CAL4})
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+    )
+    cache = CandleCache()
+    candles = [_bar("2026-06-03T03:50:00+09:00")]  # 전일 정규장(22:30~05:00) 안
+    try:
+        a = await _session_anchor(client, "AAPL", candles, "regular", cache)
+        b = await _session_anchor(client, "AAPL", candles, "regular", cache)
+    finally:
+        await client.aclose()
+    assert a == b
+    assert a == (
+        "2026-06-02T22:30:00+09:00",  # start
+        "2026-06-03T05:00:00+09:00",  # end
+        "regularMarket",              # name
+        "regularMarket",              # active(03:50 은 전일 정규장 안)
+    )
+    assert cal_calls["n"] == 1  # 2번째는 캐시
+
+
+async def test_session_anchor_calendar_failure_falls_back() -> None:
+    from tossinvest_mcp.analytics import _session_anchor
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"code": "X", "message": "down"}})
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+    )
+    try:
+        out = await _session_anchor(client, "AAPL", [_bar("2026-06-03T10:00:00+09:00")], "auto")
+    finally:
+        await client.aclose()
+    assert out == (None, None, None, None)
+
+
 # --- 에러 처리(A): 토스 ApiError 엔벨로프 노출 ---
 def test_error_detail_parses_envelope() -> None:
     resp = httpx.Response(

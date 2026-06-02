@@ -719,6 +719,35 @@ async def _fetch_candles_cached(
     return result
 
 
+async def _session_anchor(
+    client: httpx.AsyncClient,
+    symbol: str,
+    candles: list[dict[str, Any]],
+    requested: str,
+    cache: CandleCache | None = None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """선택 세션 윈도를 시장 캘린더로 해석한다 → (start, end, name, active_name).
+
+    US 종목만 캘린더 앵커. KR(6자리 숫자)·결측·호출 실패 시 (None,None,None,None) → 호출자가 갭
+    휴리스틱으로 폴백한다. cache 주입 시 market 별 TTL 로 캘린더를 재사용한다.
+    """
+    if not candles or symbol.isdigit():  # KR 6자리 숫자는 갭 휴리스틱
+        return None, None, None, None
+    now = time.monotonic()
+    cal = cache.get_calendar("US", now) if cache is not None else None
+    if cal is None:
+        try:
+            cal = await _result(client, "/api/v1/market-calendar/US", {})
+        except Exception:
+            return None, None, None, None
+        if cache is not None:
+            cache.set_calendar("US", cal, now)
+    chosen, active = _resolve_session(_session_windows(cal), candles[-1]["timestamp"], requested)
+    if chosen is None:
+        return None, None, None, active
+    return chosen["start"], chosen["end"], chosen["name"], active
+
+
 async def _regular_session_start(
     client: httpx.AsyncClient,
     symbol: str,
