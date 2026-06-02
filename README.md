@@ -28,6 +28,23 @@ uv run tossinvest-mcp
 
 ## Claude Code에 등록
 
+### 추천: `uvx` (설치·클론 없이 어디서나)
+
+PyPI에 게시되어 있어 `uvx`로 바로 실행됩니다. 자격증명은 `--env`로 전달하므로 `.env`가 필요 없습니다:
+
+```bash
+claude mcp add tossinvest \
+  --env TOSS_CLIENT_ID=발급받은_CLIENT_ID \
+  --env TOSS_CLIENT_SECRET=발급받은_CLIENT_SECRET \
+  -- uvx tossinvest-mcp
+```
+
+주문 집행까지 쓰려면 `--env TOSS_ENABLE_TRADING=true`를 추가하세요.
+
+### 로컬 체크아웃 (개발용)
+
+저장소를 클론해 수정하며 쓸 때. 자격증명은 `.env`로 설정합니다:
+
 ```bash
 claude mcp add tossinvest -- uv --directory /path/to/tossinvest-mcp run tossinvest-mcp
 ```
