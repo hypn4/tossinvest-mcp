@@ -35,3 +35,27 @@ jobs:
           name: dist
           path: dist/
       - run: uv publish --trusted-publishing always dist/*
+
+  release:
+    needs: pypi # PyPI 배포 성공 후에만 GitHub Release 생성
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Release 페이지 생성 권한
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # 이전 태그까지의 커밋 이력 필요
+      # Conventional Commits 를 릴리스 노트로 변환(커스텀 설정 없이 내장 keepachangelog 프리셋)
+      - uses: orhun/git-cliff-action@v4
+        id: changelog
+        with:
+          config: keepachangelog
+          args: --latest --strip header
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v3
+        with:
+          body: ${{ steps.changelog.outputs.content }} # 커밋 기반 자동 노트
+          files: dist/* # wheel·sdist 첨부
