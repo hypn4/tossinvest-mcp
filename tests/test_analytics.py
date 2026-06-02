@@ -18,12 +18,14 @@ from fastmcp.exceptions import ToolError
 
 from tossinvest_mcp.analytics import (
     _error_detail,
+    _pick_session_start,
     _result,
     _session_bars,
     compute_indicators,
     compute_vwap,
     money_flow_index,
     parse_candles,
+    session_context,
     summarize_microstructure,
 )
 
@@ -209,6 +211,170 @@ def test_vwap_session_anchoring() -> None:
         for i in range(2)
     ]
     assert len(_session_bars(prev + _vwap_bars())) == 3
+
+
+# --- 세션 컨텍스트(1m 분봉 장중 고저 보강) ---
+def test_session_context_excludes_prior_session() -> None:
+    # 전일 세션의 극단 고저(9999/0.1)는 당일 세션 컨텍스트에서 제외되어야 한다.
+    prev = [
+        {
+            "timestamp": f"2026-06-01T09:0{i}:00+09:00",
+            "open": 1.0,
+            "high": 9999.0,
+            "low": 0.1,
+            "close": 1.0,
+            "volume": 1.0,
+        }
+        for i in range(2)
+    ]
+    cur = [
+        {
+            "timestamp": f"2026-06-02T09:0{i}:00+09:00",
+            "open": 10.0,
+            "high": 12.0 + i,
+            "low": 9.0 - i,
+            "close": 10.0,
+            "volume": 100.0,
+        }
+        for i in range(3)
+    ]
+    ctx = session_context(prev + cur)
+    assert ctx is not None
+    assert ctx["bars_in_session"] == 3
+    assert ctx["session_start"] == "2026-06-02T09:00:00+09:00"
+    assert ctx["session_high"] == 14.0  # 당일 최고(12+2), 9999 아님
+    assert ctx["session_low"] == 7.0  # 당일 최저(9-2), 0.1 아님
+
+
+def test_session_context_empty_returns_none() -> None:
+    assert session_context([]) is None
+
+
+def test_session_bars_threshold_20min_no_split_40min_split() -> None:
+    # 임계 max(step*5, 1800s)=30분. step=1분일 때 20분 갭은 미분리, 40분 갭은 분리.
+    def bar(t: str) -> dict[str, Any]:
+        return {
+            "timestamp": t,
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 1.0,
+            "volume": 1.0,
+        }
+
+    base = [bar(f"2026-06-02T09:0{i}:00+09:00") for i in range(3)]  # step=1분
+    assert len(_session_bars(base + [bar("2026-06-02T09:22:00+09:00")])) == 4  # 20분 갭
+    assert len(_session_bars(base + [bar("2026-06-02T09:42:00+09:00")])) == 1  # 40분 갭
+
+
+# --- 정규장 캘린더 앵커(US 24h 거래 — 갭 휴리스틱이 못 잡는 경우) ---
+_CAL = {
+    "previousBusinessDay": {
+        "regularMarket": {
+            "startTime": "2026-06-02T22:30:00+09:00",
+            "endTime": "2026-06-03T05:00:00+09:00",
+        }
+    },
+    "today": {
+        "regularMarket": {
+            "startTime": "2026-06-03T22:30:00+09:00",
+            "endTime": "2026-06-04T05:00:00+09:00",
+        }
+    },
+    "nextBusinessDay": {"regularMarket": None},
+}
+
+
+def test_pick_session_start_picks_latest_started_regular() -> None:
+    # ref 가 전일 정규장(22:30~05:00) 안 → 전일 정규장 시작 앵커(당일 22:30 은 미래라 제외)
+    assert (
+        _pick_session_start(_CAL, "2026-06-03T03:50:00+09:00")
+        == "2026-06-02T22:30:00+09:00"
+    )
+
+
+def test_pick_session_start_none_when_no_regular() -> None:
+    cal = {"previousBusinessDay": {"regularMarket": None}, "today": {}}
+    assert _pick_session_start(cal, "2026-06-03T03:50:00+09:00") is None
+
+
+def test_session_context_calendar_anchor_excludes_pre_session() -> None:
+    # 정규장 시작(22:30) 이전 프리장 봉(극단 9999/0.1)은 세션 고저에서 제외되어야 한다.
+    pre = [
+        {
+            "timestamp": f"2026-06-02T21:0{i}:00+09:00",
+            "open": 1.0,
+            "high": 9999.0,
+            "low": 0.1,
+            "close": 1.0,
+            "volume": 1.0,
+        }
+        for i in range(2)
+    ]
+    reg = [
+        {
+            "timestamp": f"2026-06-02T22:3{i}:00+09:00",
+            "open": 10.0,
+            "high": 12.0 + i,
+            "low": 9.0 - i,
+            "close": 10.0,
+            "volume": 100.0,
+        }
+        for i in range(3)
+    ]
+    ctx = session_context(pre + reg, session_start="2026-06-02T22:30:00+09:00")
+    assert ctx is not None
+    assert ctx["bars_in_session"] == 3
+    assert ctx["session_high"] == 14.0  # 9999(프리장) 제외
+    assert ctx["session_low"] == 7.0
+    assert ctx["session_complete"] is True  # 데이터가 정규장 시작 이전(21:0x)까지 닿음
+
+
+def test_session_context_flags_incomplete_when_window_misses_open() -> None:
+    # 모든 봉이 정규장 시작 이후 → 시작 이전 데이터 없음 → 조용한 잘림 대신 미완 플래그.
+    reg = [
+        {
+            "timestamp": f"2026-06-02T23:0{i}:00+09:00",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
+        for i in range(3)
+    ]
+    ctx = session_context(reg, session_start="2026-06-02T22:30:00+09:00")
+    assert ctx is not None
+    assert ctx["session_complete"] is False
+
+
+def test_compute_vwap_calendar_anchor_uses_regular_only() -> None:
+    pre = [
+        {
+            "timestamp": "2026-06-02T21:00:00+09:00",
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 1.0,
+            "volume": 1000.0,
+        }
+    ]
+    reg = [
+        {
+            "timestamp": f"2026-06-02T22:3{i}:00+09:00",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0 + i,
+            "volume": 100.0,
+        }
+        for i in range(2)
+    ]
+    res = compute_vwap(pre + reg, session_start="2026-06-02T22:30:00+09:00")
+    assert res is not None
+    assert res["bars_in_session"] == 2  # 프리장(vol 1000) 제외
+    # tp0=(11+9+10)/3=10, tp1=(11+9+11)/3=10.333; vwap=(10*100+10.333*100)/200
+    assert abs(res["vwap"] - 10.1667) <= 1e-2
 
 
 # --- 마이크로구조 ---

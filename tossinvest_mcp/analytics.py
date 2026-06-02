@@ -49,6 +49,11 @@ _SYMBOL = Annotated[
 
 _CANDLE_KEYS = ("openPrice", "highPrice", "lowPrice", "closePrice", "volume")
 
+# 1분봉 분석이 한 거래 세션 전체를 덮도록 가져올 봉 수. analyze_indicators(1m)·
+# intraday_vwap 가 공유한다. 800봉(≈13h)이면 US 정규장(6.5h)+애프터마켓까지 커버해
+# 정규장 시작 이전 봉이 윈도에 포함되므로 캘린더 앵커가 세션 고저를 온전히 잡는다.
+_INTRADAY_BARS = 800
+
 
 # --- 작은 유틸 (순수) ---------------------------------------------------------
 def _f(x: Any) -> float | None:
@@ -299,16 +304,21 @@ def _adx_state(v: float | None) -> str | None:
     return "추세 강함" if v >= 25 else "횡보" if v < 20 else "중간"
 
 
-# --- VWAP (세션 앵커, 순수) ---------------------------------------------------
+# --- 세션 앵커/VWAP (순수) ----------------------------------------------------
+def _parse_ts(value: Any) -> datetime:
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
 def _session_bars(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """최근 세션 봉만 반환. 야간 갭(통상 step 의 5배 또는 30분 초과)을 세션 경계로 본다."""
+    """최근 세션 봉만 반환. 야간 갭(통상 step 의 5배 또는 30분 초과)을 세션 경계로 본다.
+
+    KR 등 진짜 야간 갭이 있는 시장에서 동작한다. 거의 24시간 연속 거래되는 US 는 갭이
+    없어 경계를 못 찾으므로(전체 반환), 이때는 _pick_session_start 로 정규장 시작을
+    명시 앵커해야 한다(_select_session 참조).
+    """
     if len(candles) < 2:
         return candles
-
-    def ts(c: dict[str, Any]) -> datetime:
-        return datetime.fromisoformat(str(c["timestamp"]).replace("Z", "+00:00"))
-
-    times = [ts(c) for c in candles]
+    times = [_parse_ts(c["timestamp"]) for c in candles]
     deltas = [(times[i] - times[i - 1]).total_seconds() for i in range(1, len(times))]
     step = sorted(deltas)[len(deltas) // 2]  # 중앙값 = 통상 1분 간격
     boundary = 0
@@ -318,10 +328,53 @@ def _session_bars(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return candles[boundary:]
 
 
-def compute_vwap(candles: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _select_session(
+    candles: list[dict[str, Any]], session_start: str | None = None
+) -> tuple[list[dict[str, Any]], bool]:
+    """(세션 봉, 세션 시작 관측 여부)를 반환한다.
+
+    session_start(ISO) 가 주어지면 그 시각 이후 봉으로 앵커(US 정규장 캘린더 기준),
+    없으면 _session_bars 갭 휴리스틱(KR 등). 두 번째 값(complete)은 세션 시작이 데이터
+    안에서 실제 관측됐는지로, False 면 윈도가 세션 일부만 덮어 고저가 불완전함을 뜻한다
+    (조용한 잘림을 막는 플래그).
+    """
+    if session_start is not None:
+        start = _parse_ts(session_start)
+        session = [c for c in candles if _parse_ts(c["timestamp"]) >= start]
+        complete = bool(candles) and _parse_ts(candles[0]["timestamp"]) <= start
+        return session, complete
+    session = _session_bars(candles)
+    return session, len(session) < len(candles)
+
+
+def _pick_session_start(calendar: Any, ref_ts: Any) -> str | None:
+    """캘린더에서 ref_ts(통상 최신 봉 시각) 이전에 시작한 가장 최근 정규장 시작 시각(ISO).
+
+    market-calendar 응답의 previous/today/next 영업일 regularMarket.startTime 중
+    ref 이전 최신을 고른다. 휴장(regularMarket=null)·결측은 건너뛰고, 없으면 None.
+    """
+    if not isinstance(calendar, dict) or not ref_ts:
+        return None
+    ref = _parse_ts(ref_ts)
+    starts: list[str] = []
+    for day in ("previousBusinessDay", "today", "nextBusinessDay"):
+        info = calendar.get(day)
+        regular = info.get("regularMarket") if isinstance(info, dict) else None
+        start = regular.get("startTime") if isinstance(regular, dict) else None
+        if start:
+            starts.append(start)
+    past = [s for s in starts if _parse_ts(s) <= ref]
+    return max(past, key=_parse_ts) if past else None
+
+
+def compute_vwap(
+    candles: list[dict[str, Any]], session_start: str | None = None
+) -> dict[str, Any] | None:
     if not candles:
         return None
-    session = _session_bars(candles)
+    session, complete = _select_session(candles, session_start)
+    if not session:
+        return None
     vwap = _last(list(VWAP(input_values=_ohlcv(session))))
     last_close = session[-1]["close"]
     return {
@@ -330,6 +383,31 @@ def compute_vwap(candles: list[dict[str, Any]]) -> dict[str, Any] | None:
         "deviation_pct": _r((last_close / vwap - 1) * 100, 2) if vwap else None,
         "bars_in_session": len(session),
         "session_start": session[0]["timestamp"],
+        "session_complete": complete,
+    }
+
+
+def session_context(
+    candles: list[dict[str, Any]], session_start: str | None = None
+) -> dict[str, Any] | None:
+    """현재 세션 봉만으로 장중 고저·세션 시작을 요약한다(1분봉 지표 대시보드 보강).
+
+    session_start 가 주어지면 그 이후(US 정규장 캘린더 앵커), 없으면 갭 휴리스틱(KR).
+    롤링 윈도 기준 range.period_high/low 와 달리 여기 고저는 당일 세션 실제 고저라,
+    윈도가 세션 일부만 덮어도 장중 극단값을 놓치지 않는다. session_complete=False 면
+    윈도가 세션 시작까지 못 닿아 고저가 불완전하다는 뜻.
+    """
+    if not candles:
+        return None
+    session, complete = _select_session(candles, session_start)
+    if not session:
+        return None
+    return {
+        "session_start": session[0]["timestamp"],
+        "bars_in_session": len(session),
+        "session_high": _r(max(c["high"] for c in session)),
+        "session_low": _r(min(c["low"] for c in session)),
+        "session_complete": complete,
     }
 
 
@@ -465,6 +543,23 @@ async def _fetch_candles(
     return parsed[-lookback:] if lookback else parsed
 
 
+async def _regular_session_start(
+    client: httpx.AsyncClient, symbol: str, candles: list[dict[str, Any]]
+) -> str | None:
+    """US 종목의 정규장 시작 시각을 캘린더로 앵커한다(KR·결측·실패 시 None → 갭 휴리스틱).
+
+    KR(6자리 숫자)은 진짜 야간 갭이 있어 _session_bars 로 충분하므로 캘린더를 쓰지 않는다.
+    캘린더 호출이 실패해도 분석을 막지 않고 None 으로 떨어진다(휴리스틱 폴백).
+    """
+    if not candles or symbol.isdigit():  # KR 6자리 숫자는 갭 휴리스틱
+        return None
+    try:
+        cal = await _result(client, "/api/v1/market-calendar/US", {})
+    except Exception:
+        return None
+    return _pick_session_start(cal, candles[-1]["timestamp"])
+
+
 # --- 등록 --------------------------------------------------------------------
 def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
     """계산형 분석 툴을 서버에 등록한다(모두 읽기 전용, 항상 노출)."""
@@ -474,29 +569,57 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
         symbol: _SYMBOL,
         interval: Annotated[
             Literal["1m", "1d"],
-            Field(description="봉 단위: 1d=일봉(중기 추세), 1m=분봉(장중)."),
+            Field(
+                description="봉 단위: 1d=일봉(중기 추세), "
+                "1m=분봉(장중, 세션 앵커 — 당일 세션 전체를 덮어 분석)."
+            ),
         ] = "1d",
         lookback: Annotated[
             int,
             Field(
                 ge=30,
                 le=252,
-                description="가져올 봉 수(30~252). 52주 고저 근사는 1d+252.",
+                description="가져올 봉 수(30~252). 52주 고저 근사는 1d+252. "
+                "interval=1d 에만 적용된다. 1m 은 lookback 을 무시하고 "
+                "당일 세션 전체(약 800봉)를 덮는다.",
             ),
         ] = 120,
     ) -> dict[str, Any]:
         """기술적 지표 대시보드(EMA·MACD·ADX·SuperTrend·RSI·Stochastic·Bollinger·ATR·OBV·MFI 등).
 
         가격/거래량을 정확히 계산해 값으로 반환하며, 매매 판단은 하지 않는다(해석은 호출자).
+
+        interval=1m 은 당일 세션 전체를 가져와 분석하고 `session`(session_start·
+        bars_in_session·session_high·session_low·session_complete)을 함께 반환한다.
+        US 는 거의 24h 연속 거래라 갭으로 세션을 못 가르므로 시장 캘린더의 정규장 시작을
+        앵커하고(KR 은 야간 갭 휴리스틱), session_complete=False 면 윈도가 정규장 시작까지
+        못 닿아 고저가 불완전함을 뜻한다. 표준 관례대로 지표 자체는 세션마다 리셋하지 않는
+        롤링 윈도로 계산하므로(차트 플랫폼과 동일), 장중 실제 고저는 롤링 윈도의 range 가
+        아니라 session_high/low 를 참조해야 한다.
         """
+        if interval == "1m":
+            candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS)
+            start = await _regular_session_start(client, symbol, candles)
+            return {
+                "symbol": symbol,
+                "interval": interval,
+                **compute_indicators(candles),
+                "session": session_context(candles, start),
+            }
         candles = await _fetch_candles(client, symbol, interval, lookback)
         return {"symbol": symbol, "interval": interval, **compute_indicators(candles)}
 
     @mcp.tool(annotations=_READ_ONLY)
     async def intraday_vwap(symbol: _SYMBOL) -> dict[str, Any]:
-        """장중 세션 기준 VWAP(거래량가중평균가)과 현재가 괴리율. 1분봉을 세션 시작부터 누적."""
-        candles = await _fetch_candles(client, symbol, "1m", 400)
-        res = compute_vwap(candles)
+        """장중 세션 기준 VWAP(거래량가중평균가)과 현재가 괴리율.
+
+        US 는 시장 캘린더의 정규장 시작을, KR 은 야간 갭을 세션 경계로 앵커해 1분봉을
+        세션 시작부터 누적한다. session_complete=False 면 윈도가 정규장 시작까지 못 닿아
+        VWAP 가 세션 일부만 반영함을 뜻한다.
+        """
+        candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS)
+        start = await _regular_session_start(client, symbol, candles)
+        res = compute_vwap(candles, start)
         return {"symbol": symbol, **(res or {"vwap": None, "note": "데이터 없음"})}
 
     @mcp.tool(annotations=_READ_ONLY)
