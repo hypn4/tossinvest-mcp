@@ -11,6 +11,7 @@ talipp(순수 파이썬, 의존성 0)로 표준 기술적 지표를 계산하고
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -669,25 +670,35 @@ async def _fetch_candles_cached(
 
 
 async def _regular_session_start(
-    client: httpx.AsyncClient, symbol: str, candles: list[dict[str, Any]]
+    client: httpx.AsyncClient,
+    symbol: str,
+    candles: list[dict[str, Any]],
+    cache: CandleCache | None = None,
 ) -> str | None:
     """US 종목의 정규장 시작 시각을 캘린더로 앵커한다(KR·결측·실패 시 None → 갭 휴리스틱).
 
     KR(6자리 숫자)은 진짜 야간 갭이 있어 _session_bars 로 충분하므로 캘린더를 쓰지 않는다.
-    캘린더 호출이 실패해도 분석을 막지 않고 None 으로 떨어진다(휴리스틱 폴백).
+    캘린더 호출이 실패해도 분석을 막지 않고 None 으로 떨어진다(휴리스틱 폴백). cache 주입 시
+    market 별 TTL 로 재사용한다.
     """
     if not candles or symbol.isdigit():  # KR 6자리 숫자는 갭 휴리스틱
         return None
-    try:
-        cal = await _result(client, "/api/v1/market-calendar/US", {})
-    except Exception:
-        return None
+    now = time.monotonic()
+    cal = cache.get_calendar("US", now) if cache is not None else None
+    if cal is None:
+        try:
+            cal = await _result(client, "/api/v1/market-calendar/US", {})
+        except Exception:
+            return None
+        if cache is not None:
+            cache.set_calendar("US", cal, now)
     return _pick_session_start(cal, candles[-1]["timestamp"])
 
 
 # --- 등록 --------------------------------------------------------------------
 def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
     """계산형 분석 툴을 서버에 등록한다(모두 읽기 전용, 항상 노출)."""
+    cache = CandleCache()
 
     @mcp.tool(annotations=_READ_ONLY)
     async def analyze_indicators(
@@ -723,15 +734,15 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
         아니라 session_high/low 를 참조해야 한다.
         """
         if interval == "1m":
-            candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS)
-            start = await _regular_session_start(client, symbol, candles)
+            candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS, cache)
+            start = await _regular_session_start(client, symbol, candles, cache)
             return {
                 "symbol": symbol,
                 "interval": interval,
                 **compute_indicators(candles),
                 "session": session_context(candles, start),
             }
-        candles = await _fetch_candles(client, symbol, interval, lookback)
+        candles = await _fetch_candles(client, symbol, interval, lookback, cache)
         return {"symbol": symbol, "interval": interval, **compute_indicators(candles)}
 
     @mcp.tool(annotations=_READ_ONLY)
@@ -742,8 +753,8 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
         세션 시작부터 누적한다. session_complete=False 면 윈도가 정규장 시작까지 못 닿아
         VWAP 가 세션 일부만 반영함을 뜻한다.
         """
-        candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS)
-        start = await _regular_session_start(client, symbol, candles)
+        candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS, cache)
+        start = await _regular_session_start(client, symbol, candles, cache)
         res = compute_vwap(candles, start)
         return {"symbol": symbol, **(res or {"vwap": None, "note": "데이터 없음"})}
 
@@ -764,7 +775,7 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
             _result(client, "/api/v1/prices", {"symbols": symbol}),
             _result(client, "/api/v1/orderbook", {"symbol": symbol}),
             _result(client, "/api/v1/trades", {"symbol": symbol, "count": 50}),
-            _fetch_candles(client, symbol, "1d", 20),
+            _fetch_candles(client, symbol, "1d", 20, cache),
             return_exceptions=True,
         )
         unavailable: list[str] = []

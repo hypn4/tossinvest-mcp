@@ -609,6 +609,50 @@ async def test_fetch_candles_cached_reuses_history() -> None:
     assert [b["timestamp"] for b in r1] == [b["timestamp"] for b in r2]  # 동일 결과
 
 
+async def test_regular_session_start_caches_calendar() -> None:
+    from tossinvest_mcp.analytics import _regular_session_start
+
+    cal_calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        cal_calls["n"] += 1
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "previousBusinessDay": {
+                        "regularMarket": {
+                            "startTime": "2026-06-02T22:30:00+09:00",
+                            "endTime": "2026-06-03T05:00:00+09:00",
+                        }
+                    },
+                    "today": {
+                        "regularMarket": {
+                            "startTime": "2026-06-03T22:30:00+09:00",
+                            "endTime": "2026-06-04T05:00:00+09:00",
+                        }
+                    },
+                    "nextBusinessDay": {"regularMarket": None},
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    cache = CandleCache()
+    candles = [_bar("2026-06-03T03:50:00+09:00")]
+    try:
+        s1 = await _regular_session_start(client, "AAPL", candles, cache)
+        s2 = await _regular_session_start(client, "AAPL", candles, cache)
+    finally:
+        await client.aclose()
+
+    assert s1 == s2 == "2026-06-02T22:30:00+09:00"
+    assert cal_calls["n"] == 1  # 2번째는 캐시 사용
+
+
 # --- 에러 처리(A): 토스 ApiError 엔벨로프 노출 ---
 def test_error_detail_parses_envelope() -> None:
     resp = httpx.Response(
