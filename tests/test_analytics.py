@@ -23,6 +23,7 @@ from tossinvest_mcp.analytics import (
     _pick_session_start,
     _result,
     _session_bars,
+    _session_windows,
     compute_indicators,
     compute_vwap,
     money_flow_index,
@@ -285,6 +286,39 @@ _CAL = {
     },
     "nextBusinessDay": {"regularMarket": None},
 }
+
+_CAL4 = {
+    "previousBusinessDay": {
+        "dayMarket": {"startTime": "2026-06-02T09:00:00+09:00", "endTime": "2026-06-02T17:00:00+09:00"},
+        "preMarket": {"startTime": "2026-06-02T17:00:00+09:00", "endTime": "2026-06-02T22:30:00+09:00"},
+        "regularMarket": {"startTime": "2026-06-02T22:30:00+09:00", "endTime": "2026-06-03T05:00:00+09:00"},
+        "afterMarket": {"startTime": "2026-06-03T05:00:00+09:00", "endTime": "2026-06-03T08:50:00+09:00"},
+    },
+    "today": {
+        "dayMarket": {"startTime": "2026-06-03T09:00:00+09:00", "endTime": "2026-06-03T17:00:00+09:00"},
+        "preMarket": {"startTime": "2026-06-03T17:00:00+09:00", "endTime": "2026-06-03T22:30:00+09:00"},
+        "regularMarket": {"startTime": "2026-06-03T22:30:00+09:00", "endTime": "2026-06-04T05:00:00+09:00"},
+        "afterMarket": None,
+    },
+    "nextBusinessDay": {},
+}
+
+
+def test_session_windows_collects_and_sorts() -> None:
+    w = _session_windows(_CAL4)
+    assert [x["name"] for x in w] == [
+        "dayMarket", "preMarket", "regularMarket", "afterMarket",  # 전일 4
+        "dayMarket", "preMarket", "regularMarket",                 # 당일 3(after=None 제외)
+    ]
+    assert w[0]["start"] == "2026-06-02T09:00:00+09:00"
+    assert w[3]["end"] == "2026-06-03T08:50:00+09:00"
+
+
+def test_session_windows_skips_nondict_and_missing() -> None:
+    assert _session_windows(None) == []
+    assert _session_windows(
+        {"today": None, "previousBusinessDay": {"regularMarket": None}, "nextBusinessDay": {}}
+    ) == []
 
 
 def test_pick_session_start_picks_latest_started_regular() -> None:

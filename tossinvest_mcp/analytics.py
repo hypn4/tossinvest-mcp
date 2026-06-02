@@ -54,6 +54,13 @@ _CANDLE_KEYS = ("openPrice", "highPrice", "lowPrice", "closePrice", "volume")
 # intraday_vwap 가 공유한다. 800봉(≈13h)이면 US 정규장(6.5h)+애프터마켓까지 커버해
 # 정규장 시작 이전 봉이 윈도에 포함되므로 캘린더 앵커가 세션 고저를 온전히 잡는다.
 _INTRADAY_BARS = 800
+_US_SESSIONS = ("dayMarket", "preMarket", "regularMarket", "afterMarket")
+_SESSION_ALIAS = {
+    "day": "dayMarket",
+    "pre": "preMarket",
+    "regular": "regularMarket",
+    "after": "afterMarket",
+}
 
 
 # --- 작은 유틸 (순수) ---------------------------------------------------------
@@ -346,6 +353,29 @@ def _select_session(
         return session, complete
     session = _session_bars(candles)
     return session, len(session) < len(candles)
+
+
+def _session_windows(calendar: Any) -> list[dict[str, str]]:
+    """캘린더 → 세션 인스턴스 [{name,start,end}] (start 오름차순). 결측·null 세션 제외.
+
+    US 4 세션(dayMarket/preMarket/regularMarket/afterMarket)을 previous/today/next 영업일에서
+    모아 정렬한다. 순수 함수(네트워크 없음).
+    """
+    if not isinstance(calendar, dict):
+        return []
+    out: list[dict[str, str]] = []
+    for day in ("previousBusinessDay", "today", "nextBusinessDay"):
+        info = calendar.get(day)
+        if not isinstance(info, dict):
+            continue
+        for name in _US_SESSIONS:
+            sess = info.get(name)
+            if isinstance(sess, dict) and sess.get("startTime") and sess.get("endTime"):
+                out.append(
+                    {"name": name, "start": sess["startTime"], "end": sess["endTime"]}
+                )
+    out.sort(key=lambda w: _parse_ts(w["start"]))
+    return out
 
 
 def _pick_session_start(calendar: Any, ref_ts: Any) -> str | None:
