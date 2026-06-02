@@ -543,6 +543,63 @@ def test_microstructure_orderbook_and_flow() -> None:
     assert "뉴스가 아님" in facts["note"]  # 데이터 파생 신호임을 명시
 
 
+# --- _fetch_candles_cached (통합, MockTransport) ---
+async def test_fetch_candles_cached_reuses_history() -> None:
+    from tossinvest_mcp.analytics import _fetch_candles_cached
+
+    # 페이지 A(before 없음): 10:00..10:09(끝=라이브). 페이지 B(before=10:00): 09:50..09:59.
+    page_a = [
+        {
+            "timestamp": f"2026-06-02T10:0{i}:00+09:00",
+            "openPrice": "1",
+            "highPrice": "1",
+            "lowPrice": "1",
+            "closePrice": "1",
+            "volume": "1",
+        }
+        for i in range(10)
+    ]
+    page_b = [
+        {
+            "timestamp": f"2026-06-02T09:5{i}:00+09:00",
+            "openPrice": "1",
+            "highPrice": "1",
+            "lowPrice": "1",
+            "closePrice": "1",
+            "volume": "1",
+        }
+        for i in range(10)
+    ]
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        before = req.url.params.get("before")
+        candles = page_b if before else page_a
+        return httpx.Response(
+            200, json={"result": {"candles": candles, "nextBefore": None}}
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    cache = CandleCache()
+    try:
+        r1 = await _fetch_candles_cached(client, "AAPL", "1m", 15, cache)
+        first = calls["n"]
+        r2 = await _fetch_candles_cached(client, "AAPL", "1m", 15, cache)
+        second = calls["n"] - first
+    finally:
+        await client.aclose()
+
+    assert first == 2  # 최신 1 + 역방향 1
+    assert second == 1  # 2번째는 최신 페이지만(과거는 캐시)
+    assert len(r1) == 15 and len(r2) == 15
+    assert r1[-1]["timestamp"] == "2026-06-02T10:09:00+09:00"  # 라이브 신선
+    assert [b["timestamp"] for b in r1] == [b["timestamp"] for b in r2]  # 동일 결과
+
+
 # --- 에러 처리(A): 토스 ApiError 엔벨로프 노출 ---
 def test_error_detail_parses_envelope() -> None:
     resp = httpx.Response(

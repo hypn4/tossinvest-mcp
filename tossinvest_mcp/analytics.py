@@ -594,8 +594,14 @@ async def _result(
 
 
 async def _fetch_candles(
-    client: httpx.AsyncClient, symbol: str, interval: str, lookback: int
+    client: httpx.AsyncClient,
+    symbol: str,
+    interval: str,
+    lookback: int,
+    cache: CandleCache | None = None,
 ) -> list[dict[str, Any]]:
+    if cache is not None:
+        return await _fetch_candles_cached(client, symbol, interval, lookback, cache)
     rows: list[dict[str, Any]] = []
     before: str | None = None
     while len(rows) < lookback:
@@ -615,6 +621,46 @@ async def _fetch_candles(
             break
     parsed = parse_candles(rows)
     return parsed[-lookback:] if lookback else parsed
+
+
+async def _fetch_candles_cached(
+    client: httpx.AsyncClient,
+    symbol: str,
+    interval: str,
+    lookback: int,
+    cache: CandleCache,
+) -> list[dict[str, Any]]:
+    """닫힌 봉은 캐시에서, 라이브 봉은 최신 페이지로 항상 신선하게. 부족분만 역방향 fetch."""
+
+    async def page(before: str | None) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "interval": interval,
+            "count": 200,
+            "adjusted": True,
+        }
+        if before:
+            params["before"] = before
+        res = await _result(client, "/api/v1/candles", params)
+        return parse_candles(res.get("candles", []) if isinstance(res, dict) else [])
+
+    fresh = await page(None)  # 최신 페이지 — 항상 신선
+    result, to_add, need_before = _merge_for_lookback(
+        cache.get_candles(symbol, interval), fresh, lookback
+    )
+    if to_add:
+        cache.extend_candles(symbol, interval, to_add)
+    guard = 0
+    while need_before is not None and guard < _MAX_PAGES:
+        guard += 1
+        older = await page(need_before)
+        if not older:
+            break
+        cache.extend_candles(symbol, interval, older)  # 과거 = 닫힘
+        result, _, need_before = _merge_for_lookback(
+            cache.get_candles(symbol, interval), fresh, lookback
+        )
+    return result
 
 
 async def _regular_session_start(
