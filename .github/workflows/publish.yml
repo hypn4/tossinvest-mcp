@@ -1,0 +1,37 @@
+name: Publish
+
+# v* 태그 push 시 빌드 후 PyPI 로 직접 배포.
+# 버전은 git 태그에서 도출됨(hatch-vcs). 인증은 PyPI Trusted Publishing(OIDC).
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # hatch-vcs 가 태그에서 버전을 읽으려면 전체 히스토리/태그 필요
+      - uses: astral-sh/setup-uv@v8.1.0
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/tossinvest-mcp/
+    permissions:
+      id-token: write # PyPI Trusted Publishing(OIDC)용. 저장된 시크릿 불필요.
+    steps:
+      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: uv publish --trusted-publishing always dist/*
