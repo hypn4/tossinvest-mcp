@@ -1458,3 +1458,33 @@ async def test_fetch_candles_cached_invalidates_on_no_overlap_in_memory() -> Non
     ts = [b["timestamp"] for b in result]
     assert "2026-06-03T09:30:00+09:00" not in ts  # 겹침 없는 아침 봉 폐기
     assert all("T13:" in t or "T14:" in t for t in ts)  # fresh 기준 연속
+
+
+async def test_fetch_candles_cached_empty_fresh_preserves_cache(tmp_path: Any) -> None:
+    # API 가 일시적으로 빈 응답(candles: [])을 줘도 영속 캐시를 파괴하지 않고 서빙해야 한다.
+    from tossinvest_mcp.analytics import _fetch_candles_cached
+
+    db = str(tmp_path / "c.db")
+    cache = CandleCache(db_path=db)
+    cache.extend_candles(
+        "AAPL",
+        "1m",
+        [
+            _cbar("2026-06-03T09:30:00+09:00"),
+            _cbar("2026-06-03T09:31:00+09:00"),
+        ],
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"result": {"candles": [], "nextBefore": None}})
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await _fetch_candles_cached(client, "AAPL", "1m", 5, cache)
+    finally:
+        await client.aclose()
+    assert len(result) == 2  # 캐시 서빙(파괴 안 됨)
+    assert len(CandleCache(db_path=db).get_candles("AAPL", "1m")) == 2  # 디스크도 보존

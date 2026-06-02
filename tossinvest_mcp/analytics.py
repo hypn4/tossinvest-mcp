@@ -786,7 +786,9 @@ def _overlap_consistent(
     """
     if not cached_closed or not fresh_page:
         return None
-    fresh_by_ts = {c["timestamp"]: c for c in fresh_page}
+    fresh_by_ts = {
+        c["timestamp"]: c for c in fresh_page[:-1]
+    }  # 라이브(마지막) 봉 제외 — 닫힌 봉만 비교
     for c in reversed(cached_closed):
         f = fresh_by_ts.get(c["timestamp"])
         if f is not None:
@@ -887,7 +889,8 @@ async def _fetch_candles_cached(
 
     fresh, cursor = await page(None)  # 최신 페이지 — 항상 신선
     cached = cache.get_candles(symbol, interval)
-    if cached and _overlap_consistent(cached, fresh) is not True:
+    # fresh 가 비면(일시적 빈 응답) 검증·병합 대상이 없으므로 캐시를 폐기하지 않고 그대로 서빙한다.
+    if cached and fresh and _overlap_consistent(cached, fresh) is not True:
         # 조정가격 재조정(가격 불연속) 또는 검증 불가(겹침 없음) → 캐시 폐기 후 fresh 기준 재구성
         cache.invalidate(symbol, interval)
         cached = []
