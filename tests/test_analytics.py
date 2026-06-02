@@ -486,10 +486,21 @@ def test_merge_dedup_overlap() -> None:
     cached = _page(["2026-06-02T10:00:00+09:00", "2026-06-02T10:01:00+09:00"])
     fresh = _page(
         ["2026-06-02T10:01:00+09:00", "2026-06-02T10:02:00+09:00"]
-    )  # 10:01 중복
-    result, _, _ = _merge_for_lookback(cached, fresh, lookback=10)
+    )  # 10:01 중복, 끝=라이브
+    result, to_add, _ = _merge_for_lookback(cached, fresh, lookback=10)
     ts = [b["timestamp"] for b in result]
     assert ts == sorted(set(ts))  # 중복 없음·정렬
+    assert ts == [
+        "2026-06-02T10:00:00+09:00",
+        "2026-06-02T10:01:00+09:00",
+        "2026-06-02T10:02:00+09:00",
+    ]
+    assert to_add == []  # 10:01 은 캐시에 이미 있고, 10:02 는 라이브라 비캐시
+
+
+def test_merge_both_empty() -> None:
+    result, to_add, need_before = _merge_for_lookback([], [], lookback=5)
+    assert result == [] and to_add == [] and need_before is None
 
 
 def test_merge_empty_fresh_serves_cache() -> None:
