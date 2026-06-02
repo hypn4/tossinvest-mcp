@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0 # hatch-vcs 가 태그에서 버전을 읽으려면 전체 히스토리/태그 필요
       - uses: astral-sh/setup-uv@v8.1.0
       - run: uv build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -30,7 +30,7 @@ jobs:
       id-token: write # PyPI Trusted Publishing(OIDC)용. 저장된 시크릿 불필요.
     steps:
       - uses: astral-sh/setup-uv@v8.1.0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
