@@ -742,11 +742,12 @@ async def _session_anchor(
             return None, None, None, None
         if cache is not None:
             cache.set_calendar("US", cal, now)
-    chosen, active = _resolve_session(_session_windows(cal), candles[-1]["timestamp"], requested)
+    chosen, active = _resolve_session(
+        _session_windows(cal), candles[-1]["timestamp"], requested
+    )
     if chosen is None:
         return None, None, None, active
     return chosen["start"], chosen["end"], chosen["name"], active
-
 
 
 # --- 등록 --------------------------------------------------------------------

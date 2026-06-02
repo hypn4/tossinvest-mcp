@@ -289,15 +289,36 @@ _CAL = {
 
 _CAL4 = {
     "previousBusinessDay": {
-        "dayMarket": {"startTime": "2026-06-02T09:00:00+09:00", "endTime": "2026-06-02T17:00:00+09:00"},
-        "preMarket": {"startTime": "2026-06-02T17:00:00+09:00", "endTime": "2026-06-02T22:30:00+09:00"},
-        "regularMarket": {"startTime": "2026-06-02T22:30:00+09:00", "endTime": "2026-06-03T05:00:00+09:00"},
-        "afterMarket": {"startTime": "2026-06-03T05:00:00+09:00", "endTime": "2026-06-03T08:50:00+09:00"},
+        "dayMarket": {
+            "startTime": "2026-06-02T09:00:00+09:00",
+            "endTime": "2026-06-02T17:00:00+09:00",
+        },
+        "preMarket": {
+            "startTime": "2026-06-02T17:00:00+09:00",
+            "endTime": "2026-06-02T22:30:00+09:00",
+        },
+        "regularMarket": {
+            "startTime": "2026-06-02T22:30:00+09:00",
+            "endTime": "2026-06-03T05:00:00+09:00",
+        },
+        "afterMarket": {
+            "startTime": "2026-06-03T05:00:00+09:00",
+            "endTime": "2026-06-03T08:50:00+09:00",
+        },
     },
     "today": {
-        "dayMarket": {"startTime": "2026-06-03T09:00:00+09:00", "endTime": "2026-06-03T17:00:00+09:00"},
-        "preMarket": {"startTime": "2026-06-03T17:00:00+09:00", "endTime": "2026-06-03T22:30:00+09:00"},
-        "regularMarket": {"startTime": "2026-06-03T22:30:00+09:00", "endTime": "2026-06-04T05:00:00+09:00"},
+        "dayMarket": {
+            "startTime": "2026-06-03T09:00:00+09:00",
+            "endTime": "2026-06-03T17:00:00+09:00",
+        },
+        "preMarket": {
+            "startTime": "2026-06-03T17:00:00+09:00",
+            "endTime": "2026-06-03T22:30:00+09:00",
+        },
+        "regularMarket": {
+            "startTime": "2026-06-03T22:30:00+09:00",
+            "endTime": "2026-06-04T05:00:00+09:00",
+        },
         "afterMarket": None,
     },
     "nextBusinessDay": {},
@@ -307,8 +328,13 @@ _CAL4 = {
 def test_session_windows_collects_and_sorts() -> None:
     w = _session_windows(_CAL4)
     assert [x["name"] for x in w] == [
-        "dayMarket", "preMarket", "regularMarket", "afterMarket",  # 전일 4
-        "dayMarket", "preMarket", "regularMarket",                 # 당일 3(after=None 제외)
+        "dayMarket",
+        "preMarket",
+        "regularMarket",
+        "afterMarket",  # 전일 4
+        "dayMarket",
+        "preMarket",
+        "regularMarket",  # 당일 3(after=None 제외)
     ]
     assert w[0]["start"] == "2026-06-02T09:00:00+09:00"
     assert w[3]["end"] == "2026-06-03T08:50:00+09:00"
@@ -316,13 +342,22 @@ def test_session_windows_collects_and_sorts() -> None:
 
 def test_session_windows_skips_nondict_and_missing() -> None:
     assert _session_windows(None) == []
-    assert _session_windows(
-        {"today": None, "previousBusinessDay": {"regularMarket": None}, "nextBusinessDay": {}}
-    ) == []
+    assert (
+        _session_windows(
+            {
+                "today": None,
+                "previousBusinessDay": {"regularMarket": None},
+                "nextBusinessDay": {},
+            }
+        )
+        == []
+    )
 
 
 def test_resolve_session_active_when_ref_in_window() -> None:
-    chosen, active = _resolve_session(_session_windows(_CAL4), "2026-06-03T03:50:00+09:00", "auto")
+    chosen, active = _resolve_session(
+        _session_windows(_CAL4), "2026-06-03T03:50:00+09:00", "auto"
+    )
     assert active == "regularMarket"  # 03:50 은 전일 정규장(22:30~05:00) 안
     assert chosen["name"] == "regularMarket"
     assert chosen["start"] == "2026-06-02T22:30:00+09:00"
@@ -330,7 +365,9 @@ def test_resolve_session_active_when_ref_in_window() -> None:
 
 def test_resolve_session_auto_falls_back_to_recent_when_no_active() -> None:
     # 08:55 는 애프터(08:50 종료)~데이(09:00 시작) 사이 공백 → active 없음 → 직전 시작 세션
-    chosen, active = _resolve_session(_session_windows(_CAL4), "2026-06-03T08:55:00+09:00", "auto")
+    chosen, active = _resolve_session(
+        _session_windows(_CAL4), "2026-06-03T08:55:00+09:00", "auto"
+    )
     assert active is None
     assert chosen["name"] == "afterMarket"
     assert chosen["start"] == "2026-06-03T05:00:00+09:00"
@@ -338,26 +375,41 @@ def test_resolve_session_auto_falls_back_to_recent_when_no_active() -> None:
 
 def test_resolve_session_explicit_picks_latest_started() -> None:
     # 당일 데이마켓 10:00 에 regular 선택 → 당일 정규장(22:30) 미개장 → 전일 정규장
-    chosen, active = _resolve_session(_session_windows(_CAL4), "2026-06-03T10:00:00+09:00", "regular")
+    chosen, active = _resolve_session(
+        _session_windows(_CAL4), "2026-06-03T10:00:00+09:00", "regular"
+    )
     assert active == "dayMarket"  # 10:00 은 당일 데이마켓 활성
     assert chosen["start"] == "2026-06-02T22:30:00+09:00"
 
 
 def test_resolve_session_explicit_missing_returns_none() -> None:
-    cal = {"today": {"regularMarket": {"startTime": "2026-06-03T22:30:00+09:00", "endTime": "2026-06-04T05:00:00+09:00"}}}
-    chosen, _ = _resolve_session(_session_windows(cal), "2026-06-03T10:00:00+09:00", "after")
+    cal = {
+        "today": {
+            "regularMarket": {
+                "startTime": "2026-06-03T22:30:00+09:00",
+                "endTime": "2026-06-04T05:00:00+09:00",
+            }
+        }
+    }
+    chosen, _ = _resolve_session(
+        _session_windows(cal), "2026-06-03T10:00:00+09:00", "after"
+    )
     assert chosen is None
 
 
 def test_resolve_session_regular_anchor_matches_legacy() -> None:
     # 구 _pick_session_start 대체: ref 가 전일 정규장 안 → 전일 정규장 시작
-    chosen, _ = _resolve_session(_session_windows(_CAL), "2026-06-03T03:50:00+09:00", "regular")
+    chosen, _ = _resolve_session(
+        _session_windows(_CAL), "2026-06-03T03:50:00+09:00", "regular"
+    )
     assert chosen["start"] == "2026-06-02T22:30:00+09:00"
 
 
 def test_resolve_session_none_when_no_regular() -> None:
     cal = {"previousBusinessDay": {"regularMarket": None}, "today": {}}
-    chosen, _ = _resolve_session(_session_windows(cal), "2026-06-03T03:50:00+09:00", "regular")
+    chosen, _ = _resolve_session(
+        _session_windows(cal), "2026-06-03T03:50:00+09:00", "regular"
+    )
     assert chosen is None
 
 
@@ -414,11 +466,31 @@ def test_session_context_flags_incomplete_when_window_misses_open() -> None:
 def test_select_session_end_bound_excludes_after_session() -> None:
     # 결함 A: 정규장 [22:30,05:00) 윈도가 종료(05:00) 이후 애프터마켓 봉을 제외
     reg = [
-        {"timestamp": f"2026-06-02T23:0{i}:00+09:00", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100.0}
+        {
+            "timestamp": f"2026-06-02T23:0{i}:00+09:00",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
         for i in range(2)
     ]
-    after = [{"timestamp": "2026-06-03T05:30:00+09:00", "open": 10.0, "high": 99.0, "low": 1.0, "close": 10.0, "volume": 100.0}]
-    ctx = session_context(reg + after, session_start="2026-06-02T22:30:00+09:00", session_end="2026-06-03T05:00:00+09:00")
+    after = [
+        {
+            "timestamp": "2026-06-03T05:30:00+09:00",
+            "open": 10.0,
+            "high": 99.0,
+            "low": 1.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
+    ]
+    ctx = session_context(
+        reg + after,
+        session_start="2026-06-02T22:30:00+09:00",
+        session_end="2026-06-03T05:00:00+09:00",
+    )
     assert ctx is not None
     assert ctx["bars_in_session"] == 2  # 애프터 봉 제외
     assert ctx["session_high"] == 11.0  # 99(애프터) 아님
@@ -426,12 +498,32 @@ def test_select_session_end_bound_excludes_after_session() -> None:
 
 def test_select_session_blend_fix_excludes_prev_regular() -> None:
     # 결함 B: 데이마켓 [09:00,17:00) 선택 시 전일 정규장 봉 미포함
-    prev_reg = [{"timestamp": "2026-06-02T23:00:00+09:00", "open": 10.0, "high": 88.0, "low": 1.0, "close": 10.0, "volume": 100.0}]
+    prev_reg = [
+        {
+            "timestamp": "2026-06-02T23:00:00+09:00",
+            "open": 10.0,
+            "high": 88.0,
+            "low": 1.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
+    ]
     day = [
-        {"timestamp": f"2026-06-03T10:0{i}:00+09:00", "open": 10.0, "high": 12.0 + i, "low": 9.0, "close": 10.0, "volume": 100.0}
+        {
+            "timestamp": f"2026-06-03T10:0{i}:00+09:00",
+            "open": 10.0,
+            "high": 12.0 + i,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
         for i in range(2)
     ]
-    ctx = session_context(prev_reg + day, session_start="2026-06-03T09:00:00+09:00", session_end="2026-06-03T17:00:00+09:00")
+    ctx = session_context(
+        prev_reg + day,
+        session_start="2026-06-03T09:00:00+09:00",
+        session_end="2026-06-03T17:00:00+09:00",
+    )
     assert ctx is not None
     assert ctx["bars_in_session"] == 2
     assert ctx["session_high"] == 13.0  # 88(전일 정규장) 아님
@@ -440,10 +532,26 @@ def test_select_session_blend_fix_excludes_prev_regular() -> None:
 def test_select_session_end_none_keeps_legacy_behavior() -> None:
     # session_end 미지정 → 현행(상한 없음) 동작 유지(후방호환)
     reg = [
-        {"timestamp": f"2026-06-02T23:0{i}:00+09:00", "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.0, "volume": 100.0}
+        {
+            "timestamp": f"2026-06-02T23:0{i}:00+09:00",
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
         for i in range(2)
     ]
-    after = [{"timestamp": "2026-06-03T05:30:00+09:00", "open": 10.0, "high": 99.0, "low": 1.0, "close": 10.0, "volume": 100.0}]
+    after = [
+        {
+            "timestamp": "2026-06-03T05:30:00+09:00",
+            "open": 10.0,
+            "high": 99.0,
+            "low": 1.0,
+            "close": 10.0,
+            "volume": 100.0,
+        }
+    ]
     ctx = session_context(reg + after, session_start="2026-06-02T22:30:00+09:00")
     assert ctx is not None
     assert ctx["bars_in_session"] == 3  # 상한 없음 → 애프터 포함(현행)
@@ -812,31 +920,51 @@ async def test_analyze_indicators_1m_session_fields() -> None:
             return httpx.Response(200, json={"result": _CAL4})
         bars = [
             # 전일 정규장 [22:30,05:00) 안의 봉 5개 (06-02 23:0x)
-            {"timestamp": f"2026-06-02T23:0{i}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            {
+                "timestamp": f"2026-06-02T23:0{i}:00+09:00",
+                "openPrice": "10",
+                "highPrice": "11",
+                "lowPrice": "9",
+                "closePrice": "10",
+                "volume": "100",
+            }
             for i in range(5)
         ] + [
             # 당일 데이마켓 [09:00,17:00) 안의 봉 5개 (06-03 10:0x) → ref(최신)=10:04 → 데이마켓 활성
-            {"timestamp": f"2026-06-03T10:0{i}:00+09:00", "openPrice": "10", "highPrice": "12", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            {
+                "timestamp": f"2026-06-03T10:0{i}:00+09:00",
+                "openPrice": "10",
+                "highPrice": "12",
+                "lowPrice": "9",
+                "closePrice": "10",
+                "volume": "100",
+            }
             for i in range(5)
         ]
-        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+        return httpx.Response(
+            200, json={"result": {"candles": bars, "nextBefore": None}}
+        )
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     mcp = build_server(client=client)
     try:
         async with Client(mcp) as c:
-            r = await c.call_tool("analyze_indicators", {"symbol": "AAPL", "interval": "1m", "session": "regular"})
+            r = await c.call_tool(
+                "analyze_indicators",
+                {"symbol": "AAPL", "interval": "1m", "session": "regular"},
+            )
             d = r.data
     finally:
         await client.aclose()
     assert d["requested_session"] == "regular"
-    assert d["active_session"] == "dayMarket"          # 최신봉 10:04 → 당일 데이마켓 활성
-    assert d["session"]["name"] == "regularMarket"      # 선택 regular → 전일 정규장
-    assert d["session"]["bars_in_session"] == 5         # 23:0x 정규장 봉 5개
-    assert d["session"]["in_progress"] is False         # 선택(regular) != 활성(day)
-    assert "trend" in d and "momentum" in d             # 지표부는 롤링 그대로
+    assert d["active_session"] == "dayMarket"  # 최신봉 10:04 → 당일 데이마켓 활성
+    assert d["session"]["name"] == "regularMarket"  # 선택 regular → 전일 정규장
+    assert d["session"]["bars_in_session"] == 5  # 23:0x 정규장 봉 5개
+    assert d["session"]["in_progress"] is False  # 선택(regular) != 활성(day)
+    assert "trend" in d and "momentum" in d  # 지표부는 롤링 그대로
 
 
 async def test_intraday_vwap_session_param_anchors() -> None:
@@ -847,13 +975,23 @@ async def test_intraday_vwap_session_param_anchors() -> None:
         if "market-calendar" in req.url.path:
             return httpx.Response(200, json={"result": _CAL4})
         bars = [
-            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            {
+                "timestamp": f"2026-06-03T10:{i:02d}:00+09:00",
+                "openPrice": "10",
+                "highPrice": "11",
+                "lowPrice": "9",
+                "closePrice": "10",
+                "volume": "100",
+            }
             for i in range(5)
         ]
-        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+        return httpx.Response(
+            200, json={"result": {"candles": bars, "nextBefore": None}}
+        )
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     mcp = build_server(client=client)
     try:
@@ -865,8 +1003,8 @@ async def test_intraday_vwap_session_param_anchors() -> None:
     assert d["requested_session"] == "day"
     assert d["active_session"] == "dayMarket"
     assert d["name"] == "dayMarket"
-    assert d["in_progress"] is True                   # day 선택 = 현재 활성
-    assert d["bars_in_session"] == 5                  # 10:00~10:04 5봉 모두 데이마켓 [09:00,17:00)
+    assert d["in_progress"] is True  # day 선택 = 현재 활성
+    assert d["bars_in_session"] == 5  # 10:00~10:04 5봉 모두 데이마켓 [09:00,17:00)
 
 
 async def test_intraday_vwap_kr_falls_back() -> None:
@@ -877,18 +1015,30 @@ async def test_intraday_vwap_kr_falls_back() -> None:
         if "market-calendar" in req.url.path:
             raise AssertionError("KR 은 캘린더 호출 안 함")
         bars = [
-            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            {
+                "timestamp": f"2026-06-03T10:{i:02d}:00+09:00",
+                "openPrice": "10",
+                "highPrice": "11",
+                "lowPrice": "9",
+                "closePrice": "10",
+                "volume": "100",
+            }
             for i in range(5)
         ]
-        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+        return httpx.Response(
+            200, json={"result": {"candles": bars, "nextBefore": None}}
+        )
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     mcp = build_server(client=client)
     try:
         async with Client(mcp) as c:
-            r = await c.call_tool("intraday_vwap", {"symbol": "005930", "session": "auto"})
+            r = await c.call_tool(
+                "intraday_vwap", {"symbol": "005930", "session": "auto"}
+            )
             d = r.data
     finally:
         await client.aclose()
@@ -906,18 +1056,31 @@ async def test_analyze_indicators_1m_empty_selected_session_consistent_shape() -
             return httpx.Response(200, json={"result": _CAL4})
         # 데이마켓 봉만 → session="regular" 윈도엔 봉 0개
         bars = [
-            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            {
+                "timestamp": f"2026-06-03T10:{i:02d}:00+09:00",
+                "openPrice": "10",
+                "highPrice": "11",
+                "lowPrice": "9",
+                "closePrice": "10",
+                "volume": "100",
+            }
             for i in range(5)
         ]
-        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+        return httpx.Response(
+            200, json={"result": {"candles": bars, "nextBefore": None}}
+        )
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     mcp = build_server(client=client)
     try:
         async with Client(mcp) as c:
-            r = await c.call_tool("analyze_indicators", {"symbol": "AAPL", "interval": "1m", "session": "regular"})
+            r = await c.call_tool(
+                "analyze_indicators",
+                {"symbol": "AAPL", "interval": "1m", "session": "regular"},
+            )
             d = r.data
     finally:
         await client.aclose()
@@ -940,10 +1103,13 @@ async def test_session_anchor_kr_returns_none() -> None:
         raise AssertionError("KR 은 캘린더를 호출하지 않아야 한다")
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     try:
-        out = await _session_anchor(client, "005930", [_bar("2026-06-03T10:00:00+09:00")], "auto")
+        out = await _session_anchor(
+            client, "005930", [_bar("2026-06-03T10:00:00+09:00")], "auto"
+        )
     finally:
         await client.aclose()
     assert out == (None, None, None, None)
@@ -959,7 +1125,8 @@ async def test_session_anchor_us_resolves_and_caches() -> None:
         return httpx.Response(200, json={"result": _CAL4})
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     cache = CandleCache()
     candles = [_bar("2026-06-03T03:50:00+09:00")]  # 전일 정규장(22:30~05:00) 안
@@ -972,8 +1139,8 @@ async def test_session_anchor_us_resolves_and_caches() -> None:
     assert a == (
         "2026-06-02T22:30:00+09:00",  # start
         "2026-06-03T05:00:00+09:00",  # end
-        "regularMarket",              # name
-        "regularMarket",              # active(03:50 은 전일 정규장 안)
+        "regularMarket",  # name
+        "regularMarket",  # active(03:50 은 전일 정규장 안)
     )
     assert cal_calls["n"] == 1  # 2번째는 캐시
 
@@ -985,10 +1152,13 @@ async def test_session_anchor_calendar_failure_falls_back() -> None:
         return httpx.Response(500, json={"error": {"code": "X", "message": "down"}})
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
     )
     try:
-        out = await _session_anchor(client, "AAPL", [_bar("2026-06-03T10:00:00+09:00")], "auto")
+        out = await _session_anchor(
+            client, "AAPL", [_bar("2026-06-03T10:00:00+09:00")], "auto"
+        )
     finally:
         await client.aclose()
     assert out == (None, None, None, None)
