@@ -803,48 +803,92 @@ async def test_fetch_candles_cached_grows_lookback_across_calls() -> None:
     assert len(large) == 8 and n_large == 2  # 최신 1 + 역방향 1(과거 보충)
 
 
-async def test_regular_session_start_caches_calendar() -> None:
-    from tossinvest_mcp.analytics import _regular_session_start
-
-    cal_calls = {"n": 0}
+async def test_analyze_indicators_1m_session_fields() -> None:
+    from fastmcp import Client
+    from tossinvest_mcp.server import build_server
 
     def handler(req: httpx.Request) -> httpx.Response:
-        cal_calls["n"] += 1
-        return httpx.Response(
-            200,
-            json={
-                "result": {
-                    "previousBusinessDay": {
-                        "regularMarket": {
-                            "startTime": "2026-06-02T22:30:00+09:00",
-                            "endTime": "2026-06-03T05:00:00+09:00",
-                        }
-                    },
-                    "today": {
-                        "regularMarket": {
-                            "startTime": "2026-06-03T22:30:00+09:00",
-                            "endTime": "2026-06-04T05:00:00+09:00",
-                        }
-                    },
-                    "nextBusinessDay": {"regularMarket": None},
-                }
-            },
-        )
+        if "market-calendar" in req.url.path:
+            return httpx.Response(200, json={"result": _CAL4})
+        bars = [
+            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            for i in range(5)
+        ]
+        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
 
     client = httpx.AsyncClient(
-        base_url="https://openapi.tossinvest.com",
-        transport=httpx.MockTransport(handler),
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
     )
-    cache = CandleCache()
-    candles = [_bar("2026-06-03T03:50:00+09:00")]
+    mcp = build_server(client=client)
     try:
-        s1 = await _regular_session_start(client, "AAPL", candles, cache)
-        s2 = await _regular_session_start(client, "AAPL", candles, cache)
+        async with Client(mcp) as c:
+            r = await c.call_tool("analyze_indicators", {"symbol": "AAPL", "interval": "1m", "session": "regular"})
+            d = r.data
     finally:
         await client.aclose()
+    assert d["requested_session"] == "regular"
+    assert d["active_session"] == "dayMarket"        # 10:xx 은 당일 데이마켓 활성
+    assert d["session"]["name"] == "regularMarket"   # 선택은 regular → 전일 정규장
+    assert d["session"]["in_progress"] is False       # 선택 세션 != 활성 세션
+    assert "trend" in d and "momentum" in d           # 지표부는 그대로 존재(롤링)
 
-    assert s1 == s2 == "2026-06-02T22:30:00+09:00"
-    assert cal_calls["n"] == 1  # 2번째는 캐시 사용
+
+async def test_intraday_vwap_session_param_anchors() -> None:
+    from fastmcp import Client
+    from tossinvest_mcp.server import build_server
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "market-calendar" in req.url.path:
+            return httpx.Response(200, json={"result": _CAL4})
+        bars = [
+            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            for i in range(5)
+        ]
+        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+    )
+    mcp = build_server(client=client)
+    try:
+        async with Client(mcp) as c:
+            r = await c.call_tool("intraday_vwap", {"symbol": "AAPL", "session": "day"})
+            d = r.data
+    finally:
+        await client.aclose()
+    assert d["requested_session"] == "day"
+    assert d["active_session"] == "dayMarket"
+    assert d["name"] == "dayMarket"
+    assert d["in_progress"] is True                   # day 선택 = 현재 활성
+    assert d["bars_in_session"] == 5                  # 10:00~10:04 5봉 모두 데이마켓 [09:00,17:00)
+
+
+async def test_intraday_vwap_kr_falls_back() -> None:
+    from fastmcp import Client
+    from tossinvest_mcp.server import build_server
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "market-calendar" in req.url.path:
+            raise AssertionError("KR 은 캘린더 호출 안 함")
+        bars = [
+            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            for i in range(5)
+        ]
+        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+    )
+    mcp = build_server(client=client)
+    try:
+        async with Client(mcp) as c:
+            r = await c.call_tool("intraday_vwap", {"symbol": "005930", "session": "auto"})
+            d = r.data
+    finally:
+        await client.aclose()
+    assert d["active_session"] is None
+    assert d["name"] is None
+    assert d["in_progress"] is None
 
 
 async def test_session_anchor_kr_returns_none() -> None:

@@ -50,10 +50,10 @@ _SYMBOL = Annotated[
 
 _CANDLE_KEYS = ("openPrice", "highPrice", "lowPrice", "closePrice", "volume")
 
-# 1분봉 분석이 한 거래 세션 전체를 덮도록 가져올 봉 수. analyze_indicators(1m)·
-# intraday_vwap 가 공유한다. 800봉(≈13h)이면 US 정규장(6.5h)+애프터마켓까지 커버해
-# 정규장 시작 이전 봉이 윈도에 포함되므로 캘린더 앵커가 세션 고저를 온전히 잡는다.
-_INTRADAY_BARS = 800
+# 1분봉 분석이 한 거래 세션 사이클 전체를 덮도록 가져올 봉 수. analyze_indicators(1m)·
+# intraday_vwap 가 공유한다. 1500봉(≈25h)이면 US 한 사이클(데이 09:00→애프터 08:50≈1430분)을
+# 덮어, 네 세션 중 무엇을 골라도 직전 인스턴스를 온전히 잡는다(닫힌 봉은 캐시로 상쇄).
+_INTRADAY_BARS = 1500
 _US_SESSIONS = ("dayMarket", "preMarket", "regularMarket", "afterMarket")
 _SESSION_ALIAS = {
     "day": "dayMarket",
@@ -748,32 +748,6 @@ async def _session_anchor(
     return chosen["start"], chosen["end"], chosen["name"], active
 
 
-async def _regular_session_start(
-    client: httpx.AsyncClient,
-    symbol: str,
-    candles: list[dict[str, Any]],
-    cache: CandleCache | None = None,
-) -> str | None:
-    """US 종목의 정규장 시작 시각을 캘린더로 앵커한다(KR·결측·실패 시 None → 갭 휴리스틱).
-
-    KR(6자리 숫자)은 진짜 야간 갭이 있어 _session_bars 로 충분하므로 캘린더를 쓰지 않는다.
-    캘린더 호출이 실패해도 분석을 막지 않고 None 으로 떨어진다(휴리스틱 폴백). cache 주입 시
-    market 별 TTL 로 재사용한다.
-    """
-    if not candles or symbol.isdigit():  # KR 6자리 숫자는 갭 휴리스틱
-        return None
-    now = time.monotonic()
-    cal = cache.get_calendar("US", now) if cache is not None else None
-    if cal is None:
-        try:
-            cal = await _result(client, "/api/v1/market-calendar/US", {})
-        except Exception:
-            return None
-        if cache is not None:
-            cache.set_calendar("US", cal, now)
-    chosen, _ = _resolve_session(_session_windows(cal), candles[-1]["timestamp"], "regular")
-    return chosen["start"] if chosen else None
-
 
 # --- 등록 --------------------------------------------------------------------
 def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
@@ -800,6 +774,14 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
                 "당일 세션 전체(약 800봉)를 덮는다.",
             ),
         ] = 120,
+        session: Annotated[
+            Literal["auto", "day", "pre", "regular", "after"],
+            Field(
+                description="1m 세션 선택: auto=현재 활성(없으면 직전) 세션, "
+                "day/pre/regular/after=US 데이/프리/정규/애프터마켓. interval=1m 에만 적용. "
+                "지표 대시보드는 롤링 윈도라 session 과 무관하게 동일하고, session.* 와 VWAP 만 선택 세션을 반영한다."
+            ),
+        ] = "auto",
     ) -> dict[str, Any]:
         """기술적 지표 대시보드(EMA·MACD·ADX·SuperTrend·RSI·Stochastic·Bollinger·ATR·OBV·MFI 등).
 
@@ -815,28 +797,67 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
         """
         if interval == "1m":
             candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS, cache)
-            start = await _regular_session_start(client, symbol, candles, cache)
+            start, end, name, active = await _session_anchor(
+                client, symbol, candles, session, cache
+            )
+            sess = session_context(candles, start, end)
+            if sess is not None:
+                sess = {
+                    "name": name,
+                    **sess,
+                    "in_progress": (name == active) if name is not None else None,
+                }
+            else:
+                sess = {
+                    "name": name,
+                    "in_progress": (name == active) if name is not None else None,
+                }
             return {
                 "symbol": symbol,
                 "interval": interval,
+                "requested_session": session,
+                "active_session": active,
                 **compute_indicators(candles),
-                "session": session_context(candles, start),
+                "session": sess,
             }
         candles = await _fetch_candles(client, symbol, interval, lookback, cache)
         return {"symbol": symbol, "interval": interval, **compute_indicators(candles)}
 
     @mcp.tool(annotations=_READ_ONLY)
-    async def intraday_vwap(symbol: _SYMBOL) -> dict[str, Any]:
+    async def intraday_vwap(
+        symbol: _SYMBOL,
+        session: Annotated[
+            Literal["auto", "day", "pre", "regular", "after"],
+            Field(
+                description="세션 선택: auto=현재 활성(없으면 직전) 세션, "
+                "day/pre/regular/after=US 데이/프리/정규/애프터마켓. VWAP 를 선택 세션 시작에 앵커한다."
+            ),
+        ] = "auto",
+    ) -> dict[str, Any]:
         """장중 세션 기준 VWAP(거래량가중평균가)과 현재가 괴리율.
 
-        US 는 시장 캘린더의 정규장 시작을, KR 은 야간 갭을 세션 경계로 앵커해 1분봉을
-        세션 시작부터 누적한다. session_complete=False 면 윈도가 정규장 시작까지 못 닿아
-        VWAP 가 세션 일부만 반영함을 뜻한다.
+        US 는 시장 캘린더로 선택 세션(`session`)의 시작에 앵커하고, KR 은 야간 갭을 세션 경계로
+        앵커한다. session_complete=False 면 윈도가 세션 시작까지 못 닿아 VWAP 가 세션 일부만
+        반영함을 뜻한다. active_session 은 현재 열린 세션(KR/폴백 시 null).
         """
         candles = await _fetch_candles(client, symbol, "1m", _INTRADAY_BARS, cache)
-        start = await _regular_session_start(client, symbol, candles, cache)
-        res = compute_vwap(candles, start)
-        return {"symbol": symbol, **(res or {"vwap": None, "note": "데이터 없음"})}
+        start, end, name, active = await _session_anchor(
+            client, symbol, candles, session, cache
+        )
+        res = compute_vwap(candles, start, end)
+        out: dict[str, Any] = {
+            "symbol": symbol,
+            "requested_session": session,
+            "active_session": active,
+            "name": name,
+        }
+        if res is not None:
+            out.update(res)
+            out["in_progress"] = (name == active) if name is not None else None
+        else:
+            out["vwap"] = None
+            out["note"] = "데이터 없음"
+        return out
 
     @mcp.tool(annotations=_READ_ONLY)
     async def get_market_signals(symbol: _SYMBOL) -> dict[str, Any]:
