@@ -811,7 +811,12 @@ async def test_analyze_indicators_1m_session_fields() -> None:
         if "market-calendar" in req.url.path:
             return httpx.Response(200, json={"result": _CAL4})
         bars = [
-            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            # 전일 정규장 [22:30,05:00) 안의 봉 5개 (06-02 23:0x)
+            {"timestamp": f"2026-06-02T23:0{i}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            for i in range(5)
+        ] + [
+            # 당일 데이마켓 [09:00,17:00) 안의 봉 5개 (06-03 10:0x) → ref(최신)=10:04 → 데이마켓 활성
+            {"timestamp": f"2026-06-03T10:0{i}:00+09:00", "openPrice": "10", "highPrice": "12", "lowPrice": "9", "closePrice": "10", "volume": "100"}
             for i in range(5)
         ]
         return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
@@ -827,10 +832,11 @@ async def test_analyze_indicators_1m_session_fields() -> None:
     finally:
         await client.aclose()
     assert d["requested_session"] == "regular"
-    assert d["active_session"] == "dayMarket"        # 10:xx 은 당일 데이마켓 활성
-    assert d["session"]["name"] == "regularMarket"   # 선택은 regular → 전일 정규장
-    assert d["session"]["in_progress"] is False       # 선택 세션 != 활성 세션
-    assert "trend" in d and "momentum" in d           # 지표부는 그대로 존재(롤링)
+    assert d["active_session"] == "dayMarket"          # 최신봉 10:04 → 당일 데이마켓 활성
+    assert d["session"]["name"] == "regularMarket"      # 선택 regular → 전일 정규장
+    assert d["session"]["bars_in_session"] == 5         # 23:0x 정규장 봉 5개
+    assert d["session"]["in_progress"] is False         # 선택(regular) != 활성(day)
+    assert "trend" in d and "momentum" in d             # 지표부는 롤링 그대로
 
 
 async def test_intraday_vwap_session_param_anchors() -> None:
@@ -889,6 +895,42 @@ async def test_intraday_vwap_kr_falls_back() -> None:
     assert d["active_session"] is None
     assert d["name"] is None
     assert d["in_progress"] is None
+
+
+async def test_analyze_indicators_1m_empty_selected_session_consistent_shape() -> None:
+    from fastmcp import Client
+    from tossinvest_mcp.server import build_server
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "market-calendar" in req.url.path:
+            return httpx.Response(200, json={"result": _CAL4})
+        # 데이마켓 봉만 → session="regular" 윈도엔 봉 0개
+        bars = [
+            {"timestamp": f"2026-06-03T10:{i:02d}:00+09:00", "openPrice": "10", "highPrice": "11", "lowPrice": "9", "closePrice": "10", "volume": "100"}
+            for i in range(5)
+        ]
+        return httpx.Response(200, json={"result": {"candles": bars, "nextBefore": None}})
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com", transport=httpx.MockTransport(handler)
+    )
+    mcp = build_server(client=client)
+    try:
+        async with Client(mcp) as c:
+            r = await c.call_tool("analyze_indicators", {"symbol": "AAPL", "interval": "1m", "session": "regular"})
+            d = r.data
+    finally:
+        await client.aclose()
+    # 윈도에 봉이 없어도 session 블록 키가 일관되어야 한다(7키)
+    assert d["session"] == {
+        "name": "regularMarket",
+        "session_start": None,
+        "bars_in_session": 0,
+        "session_high": None,
+        "session_low": None,
+        "session_complete": False,
+        "in_progress": False,
+    }
 
 
 async def test_session_anchor_kr_returns_none() -> None:

@@ -810,6 +810,11 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
             else:
                 sess = {
                     "name": name,
+                    "session_start": None,
+                    "bars_in_session": 0,
+                    "session_high": None,
+                    "session_low": None,
+                    "session_complete": False,
                     "in_progress": (name == active) if name is not None else None,
                 }
             return {
