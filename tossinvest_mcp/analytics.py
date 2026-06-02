@@ -491,6 +491,44 @@ def summarize_microstructure(
     return facts
 
 
+# --- 인메모리 캐시 (rate-limit 완화; 닫힌 봉·캘린더만, 라이브는 항상 신선) ------
+_MAX_PAGES = 10  # 캐시 역방향 페이지네이션 가드(200*10=2000봉)
+
+
+class CandleCache:
+    """확정(닫힌) 캔들과 시장 캘린더의 인메모리 캐시(서버 수명 1개).
+
+    닫힌 봉은 불변이라 누적 보관하고, 라이브 봉은 캐시하지 않는다(호출자가 매번 신선
+    fetch). 캘린더는 market 별 TTL. 단일 사용자 세션 기준이라 동시성 보호는 두지 않는다.
+    """
+
+    def __init__(
+        self, max_bars: int = 2000, max_series: int = 64, calendar_ttl: float = 1800.0
+    ) -> None:
+        self._candles: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self._calendar: dict[str, tuple[Any, float]] = {}
+        self._max_bars = max_bars
+        self._max_series = max_series
+        self._calendar_ttl = calendar_ttl
+
+    def get_candles(self, symbol: str, interval: str) -> list[dict[str, Any]]:
+        return self._candles.get((symbol, interval), [])
+
+    def extend_candles(
+        self, symbol: str, interval: str, bars: list[dict[str, Any]]
+    ) -> None:
+        key = (symbol, interval)
+        merged = {c["timestamp"]: c for c in self._candles.get(key, [])}
+        for c in bars:
+            merged[c["timestamp"]] = c
+        out = sorted(merged.values(), key=lambda c: c["timestamp"])
+        if len(out) > self._max_bars:
+            out = out[-self._max_bars :]
+        if key not in self._candles and len(self._candles) >= self._max_series:
+            self._candles.pop(next(iter(self._candles)))  # 가장 먼저 들어온 시리즈 폐기
+        self._candles[key] = out
+
+
 # --- fetch (httpx, 순수 계산과 분리) ------------------------------------------
 def _error_detail(resp: httpx.Response) -> str:
     """토스 에러 엔벨로프(ApiError{code,message,requestId})를 LLM 친화 메시지로.

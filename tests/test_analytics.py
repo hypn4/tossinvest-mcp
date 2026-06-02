@@ -17,6 +17,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from tossinvest_mcp.analytics import (
+    CandleCache,
     _error_detail,
     _pick_session_start,
     _result,
@@ -375,6 +376,52 @@ def test_compute_vwap_calendar_anchor_uses_regular_only() -> None:
     assert res["bars_in_session"] == 2  # 프리장(vol 1000) 제외
     # tp0=(11+9+10)/3=10, tp1=(11+9+11)/3=10.333; vwap=(10*100+10.333*100)/200
     assert abs(res["vwap"] - 10.1667) <= 1e-2
+
+
+# --- CandleCache ---
+def _bar(ts: str, high: float = 1.0, low: float = 1.0) -> dict[str, Any]:
+    return {
+        "timestamp": ts,
+        "open": 1.0,
+        "high": high,
+        "low": low,
+        "close": 1.0,
+        "volume": 1.0,
+    }
+
+
+def test_candle_cache_extend_dedup_and_sort() -> None:
+    c = CandleCache()
+    c.extend_candles(
+        "AAPL",
+        "1m",
+        [_bar("2026-06-02T10:01:00+09:00"), _bar("2026-06-02T10:00:00+09:00")],
+    )
+    c.extend_candles(
+        "AAPL",
+        "1m",
+        [_bar("2026-06-02T10:01:00+09:00"), _bar("2026-06-02T10:02:00+09:00")],
+    )
+    got = c.get_candles("AAPL", "1m")
+    assert [b["timestamp"] for b in got] == [
+        "2026-06-02T10:00:00+09:00",
+        "2026-06-02T10:01:00+09:00",
+        "2026-06-02T10:02:00+09:00",
+    ]
+
+
+def test_candle_cache_caps_oldest() -> None:
+    c = CandleCache(max_bars=3)
+    c.extend_candles(
+        "AAPL", "1m", [_bar(f"2026-06-02T10:0{i}:00+09:00") for i in range(5)]
+    )
+    got = c.get_candles("AAPL", "1m")
+    assert len(got) == 3
+    assert got[0]["timestamp"] == "2026-06-02T10:02:00+09:00"  # 오래된 것 폐기
+
+
+def test_candle_cache_empty_key_returns_list() -> None:
+    assert CandleCache().get_candles("NONE", "1m") == []
 
 
 # --- 마이크로구조 ---
