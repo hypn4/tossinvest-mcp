@@ -1204,3 +1204,52 @@ async def test_result_raises_toolerror_with_message() -> None:
         assert "BAD" in str(ei.value) and "잘못된 요청" in str(ei.value)
     finally:
         await client.aclose()
+
+
+async def test_intraday_vwap_empty_selected_session_consistent_shape() -> None:
+    from fastmcp import Client
+    from tossinvest_mcp.server import build_server
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "market-calendar" in req.url.path:
+            return httpx.Response(200, json={"result": _CAL4})
+        # 데이마켓 봉만 → session="regular" 윈도엔 봉 0개
+        bars = [
+            {
+                "timestamp": f"2026-06-03T10:{i:02d}:00+09:00",
+                "openPrice": "10",
+                "highPrice": "11",
+                "lowPrice": "9",
+                "closePrice": "10",
+                "volume": "100",
+            }
+            for i in range(5)
+        ]
+        return httpx.Response(
+            200, json={"result": {"candles": bars, "nextBefore": None}}
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://openapi.tossinvest.com",
+        transport=httpx.MockTransport(handler),
+    )
+    mcp = build_server(client=client)
+    try:
+        async with Client(mcp) as c:
+            r = await c.call_tool(
+                "intraday_vwap", {"symbol": "AAPL", "session": "regular"}
+            )
+            d = r.data
+    finally:
+        await client.aclose()
+    assert d["requested_session"] == "regular"
+    assert d["active_session"] == "dayMarket"
+    assert d["name"] == "regularMarket"
+    assert d["vwap"] is None
+    assert d["last_price"] is None
+    assert d["deviation_pct"] is None
+    assert d["bars_in_session"] == 0
+    assert d["session_start"] is None
+    assert d["session_complete"] is False
+    assert d["in_progress"] is False
+    assert d["note"] == "선택 세션에 봉 없음(윈도 밖)"

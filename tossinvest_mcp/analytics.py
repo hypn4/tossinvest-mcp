@@ -772,7 +772,7 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
                 le=252,
                 description="가져올 봉 수(30~252). 52주 고저 근사는 1d+252. "
                 "interval=1d 에만 적용된다. 1m 은 lookback 을 무시하고 "
-                "당일 세션 전체(약 800봉)를 덮는다.",
+                "당일 세션 전체(약 1,500봉)를 덮는다.",
             ),
         ] = 120,
         session: Annotated[
@@ -861,8 +861,22 @@ def register_analytics(mcp: FastMCP, client: httpx.AsyncClient) -> None:
             out.update(res)
             out["in_progress"] = (name == active) if name is not None else None
         else:
-            out["vwap"] = None
-            out["note"] = "데이터 없음"
+            # candles 는 있으나 선택 세션 윈도에 봉이 0개(직전 인스턴스가 fetch 윈도 밖)면 name 이 잡힌다.
+            # candles 자체가 없으면 name=None. 두 경우 모두 키 집합을 동일하게 유지한다.
+            out.update(
+                {
+                    "vwap": None,
+                    "last_price": None,
+                    "deviation_pct": None,
+                    "bars_in_session": 0,
+                    "session_start": None,
+                    "session_complete": False,
+                    "in_progress": (name == active) if name is not None else None,
+                    "note": "선택 세션에 봉 없음(윈도 밖)"
+                    if name is not None
+                    else "데이터 없음",
+                }
+            )
         return out
 
     @mcp.tool(annotations=_READ_ONLY)
