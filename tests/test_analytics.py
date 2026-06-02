@@ -359,6 +359,7 @@ def test_resolve_session_active_when_ref_in_window() -> None:
         _session_windows(_CAL4), "2026-06-03T03:50:00+09:00", "auto"
     )
     assert active == "regularMarket"  # 03:50 은 전일 정규장(22:30~05:00) 안
+    assert chosen is not None
     assert chosen["name"] == "regularMarket"
     assert chosen["start"] == "2026-06-02T22:30:00+09:00"
 
@@ -369,6 +370,7 @@ def test_resolve_session_auto_falls_back_to_recent_when_no_active() -> None:
         _session_windows(_CAL4), "2026-06-03T08:55:00+09:00", "auto"
     )
     assert active is None
+    assert chosen is not None
     assert chosen["name"] == "afterMarket"
     assert chosen["start"] == "2026-06-03T05:00:00+09:00"
 
@@ -379,6 +381,7 @@ def test_resolve_session_explicit_picks_latest_started() -> None:
         _session_windows(_CAL4), "2026-06-03T10:00:00+09:00", "regular"
     )
     assert active == "dayMarket"  # 10:00 은 당일 데이마켓 활성
+    assert chosen is not None
     assert chosen["start"] == "2026-06-02T22:30:00+09:00"
 
 
@@ -402,6 +405,7 @@ def test_resolve_session_regular_anchor_matches_legacy() -> None:
     chosen, _ = _resolve_session(
         _session_windows(_CAL), "2026-06-03T03:50:00+09:00", "regular"
     )
+    assert chosen is not None
     assert chosen["start"] == "2026-06-02T22:30:00+09:00"
 
 
