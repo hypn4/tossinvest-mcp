@@ -17,3 +17,6 @@ wheels/
 
 # graphify 생성 산출물(코드에서 재생성)
 graphify-out/
+
+# 설계 문서(브레인스토밍 스펙 — 로컬 전용)
+docs/superpowers/
