@@ -5,6 +5,8 @@ description = "토스증권 Open API용 MCP 서버"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "hypn4", email = "khs951211@gmail.com" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "fastmcp>=3.3.1",
     "httpx>=0.28.1",
