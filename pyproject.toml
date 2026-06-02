@@ -1,0 +1,51 @@
+[project]
+name = "tossinvest-mcp"
+dynamic = ["version"]
+description = "토스증권 Open API용 MCP 서버"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "hypn4", email = "khs951211@gmail.com" }]
+dependencies = [
+    "fastmcp>=3.3.1",
+    "httpx>=0.28.1",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+]
+
+[project.scripts]
+tossinvest-mcp = "tossinvest_mcp.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.410",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.15",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "e2e: 실제 토스증권 API 호출이 필요한 end-to-end 테스트 (creds 필요)",
+]
+
+# 버전은 git 태그에서 도출(v1.2.3 -> 1.2.3). 태그가 없을 때는 fallback 사용.
+[tool.hatch.version]
+source = "vcs"
+raw-options = { version_scheme = "no-guess-dev", fallback_version = "0.0.0" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["tossinvest_mcp"]
+# spec/ 의 데이터 파일(openapi.json 등)을 wheel 에 포함
+artifacts = ["tossinvest_mcp/spec/*"]
+
+[tool.hatch.build.targets.sdist]
+include = ["tossinvest_mcp", "tests", "scripts"]
+
+[build-system]
+requires = ["hatchling>=1.20.0", "hatch-vcs"]
+build-backend = "hatchling.build"
