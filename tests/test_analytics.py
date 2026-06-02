@@ -20,7 +20,7 @@ from tossinvest_mcp.analytics import (
     CandleCache,
     _error_detail,
     _merge_for_lookback,
-    _pick_session_start,
+    _resolve_session,
     _result,
     _session_bars,
     _session_windows,
@@ -321,17 +321,44 @@ def test_session_windows_skips_nondict_and_missing() -> None:
     ) == []
 
 
-def test_pick_session_start_picks_latest_started_regular() -> None:
-    # ref 가 전일 정규장(22:30~05:00) 안 → 전일 정규장 시작 앵커(당일 22:30 은 미래라 제외)
-    assert (
-        _pick_session_start(_CAL, "2026-06-03T03:50:00+09:00")
-        == "2026-06-02T22:30:00+09:00"
-    )
+def test_resolve_session_active_when_ref_in_window() -> None:
+    chosen, active = _resolve_session(_session_windows(_CAL4), "2026-06-03T03:50:00+09:00", "auto")
+    assert active == "regularMarket"  # 03:50 은 전일 정규장(22:30~05:00) 안
+    assert chosen["name"] == "regularMarket"
+    assert chosen["start"] == "2026-06-02T22:30:00+09:00"
 
 
-def test_pick_session_start_none_when_no_regular() -> None:
+def test_resolve_session_auto_falls_back_to_recent_when_no_active() -> None:
+    # 08:55 는 애프터(08:50 종료)~데이(09:00 시작) 사이 공백 → active 없음 → 직전 시작 세션
+    chosen, active = _resolve_session(_session_windows(_CAL4), "2026-06-03T08:55:00+09:00", "auto")
+    assert active is None
+    assert chosen["name"] == "afterMarket"
+    assert chosen["start"] == "2026-06-03T05:00:00+09:00"
+
+
+def test_resolve_session_explicit_picks_latest_started() -> None:
+    # 당일 데이마켓 10:00 에 regular 선택 → 당일 정규장(22:30) 미개장 → 전일 정규장
+    chosen, active = _resolve_session(_session_windows(_CAL4), "2026-06-03T10:00:00+09:00", "regular")
+    assert active == "dayMarket"  # 10:00 은 당일 데이마켓 활성
+    assert chosen["start"] == "2026-06-02T22:30:00+09:00"
+
+
+def test_resolve_session_explicit_missing_returns_none() -> None:
+    cal = {"today": {"regularMarket": {"startTime": "2026-06-03T22:30:00+09:00", "endTime": "2026-06-04T05:00:00+09:00"}}}
+    chosen, _ = _resolve_session(_session_windows(cal), "2026-06-03T10:00:00+09:00", "after")
+    assert chosen is None
+
+
+def test_resolve_session_regular_anchor_matches_legacy() -> None:
+    # 구 _pick_session_start 대체: ref 가 전일 정규장 안 → 전일 정규장 시작
+    chosen, _ = _resolve_session(_session_windows(_CAL), "2026-06-03T03:50:00+09:00", "regular")
+    assert chosen["start"] == "2026-06-02T22:30:00+09:00"
+
+
+def test_resolve_session_none_when_no_regular() -> None:
     cal = {"previousBusinessDay": {"regularMarket": None}, "today": {}}
-    assert _pick_session_start(cal, "2026-06-03T03:50:00+09:00") is None
+    chosen, _ = _resolve_session(_session_windows(cal), "2026-06-03T03:50:00+09:00", "regular")
+    assert chosen is None
 
 
 def test_session_context_calendar_anchor_excludes_pre_session() -> None:

@@ -321,7 +321,7 @@ def _session_bars(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """최근 세션 봉만 반환. 야간 갭(통상 step 의 5배 또는 30분 초과)을 세션 경계로 본다.
 
     KR 등 진짜 야간 갭이 있는 시장에서 동작한다. 거의 24시간 연속 거래되는 US 는 갭이
-    없어 경계를 못 찾으므로(전체 반환), 이때는 _pick_session_start 로 정규장 시작을
+    없어 경계를 못 찾으므로(전체 반환), 이때는 _resolve_session 으로 정규장 시작을
     명시 앵커해야 한다(_select_session 참조).
     """
     if len(candles) < 2:
@@ -378,24 +378,30 @@ def _session_windows(calendar: Any) -> list[dict[str, str]]:
     return out
 
 
-def _pick_session_start(calendar: Any, ref_ts: Any) -> str | None:
-    """캘린더에서 ref_ts(통상 최신 봉 시각) 이전에 시작한 가장 최근 정규장 시작 시각(ISO).
+def _resolve_session(
+    windows: list[dict[str, str]], ref: Any, requested: str
+) -> tuple[dict[str, str] | None, str | None]:
+    """(선택 세션 윈도, 현재 활성 세션명)을 고른다. 순수 함수.
 
-    market-calendar 응답의 previous/today/next 영업일 regularMarket.startTime 중
-    ref 이전 최신을 고른다. 휴장(regularMarket=null)·결측은 건너뛰고, 없으면 None.
+    active = start ≤ ref < end 인 인스턴스(최대 1개). requested='auto' 는 active, 없으면 ref
+    이전 시작한 가장 최근 세션. 명시(day/pre/regular/after)는 해당 name 중 ref 이전 시작한 가장
+    최근 인스턴스(없으면 None). active_name 은 chosen 과 무관하게 현재 열린 세션명(or None).
     """
-    if not isinstance(calendar, dict) or not ref_ts:
-        return None
-    ref = _parse_ts(ref_ts)
-    starts: list[str] = []
-    for day in ("previousBusinessDay", "today", "nextBusinessDay"):
-        info = calendar.get(day)
-        regular = info.get("regularMarket") if isinstance(info, dict) else None
-        start = regular.get("startTime") if isinstance(regular, dict) else None
-        if start:
-            starts.append(start)
-    past = [s for s in starts if _parse_ts(s) <= ref]
-    return max(past, key=_parse_ts) if past else None
+    r = _parse_ts(ref)
+    active = next(
+        (w for w in windows if _parse_ts(w["start"]) <= r < _parse_ts(w["end"])), None
+    )
+    active_name = active["name"] if active else None
+    if requested == "auto":
+        if active is not None:
+            return active, active_name
+        started = [w for w in windows if _parse_ts(w["start"]) <= r]
+        chosen = max(started, key=lambda w: _parse_ts(w["start"])) if started else None
+        return chosen, active_name
+    target = _SESSION_ALIAS.get(requested)
+    cands = [w for w in windows if w["name"] == target and _parse_ts(w["start"]) <= r]
+    chosen = max(cands, key=lambda w: _parse_ts(w["start"])) if cands else None
+    return chosen, active_name
 
 
 def compute_vwap(
@@ -724,7 +730,8 @@ async def _regular_session_start(
             return None
         if cache is not None:
             cache.set_calendar("US", cal, now)
-    return _pick_session_start(cal, candles[-1]["timestamp"])
+    chosen, _ = _resolve_session(_session_windows(cal), candles[-1]["timestamp"], "regular")
+    return chosen["start"] if chosen else None
 
 
 # --- 등록 --------------------------------------------------------------------
