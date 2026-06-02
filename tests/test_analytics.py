@@ -19,6 +19,7 @@ from fastmcp.exceptions import ToolError
 from tossinvest_mcp.analytics import (
     CandleCache,
     _error_detail,
+    _merge_for_lookback,
     _pick_session_start,
     _result,
     _session_bars,
@@ -442,6 +443,61 @@ def test_candle_cache_calendar_ttl() -> None:
     assert c.get_calendar("US", now=1050.0) == {"today": {}}  # TTL 내
     assert c.get_calendar("US", now=1101.0) is None  # 만료
     assert c.get_calendar("KR", now=1050.0) is None  # 미설정
+
+
+# --- _merge_for_lookback (순수) ---
+def _page(ts_list: list[str]) -> list[dict[str, Any]]:
+    return [_bar(t) for t in ts_list]
+
+
+def test_merge_enough_from_cache_no_need_before() -> None:
+    cached = _page(
+        [f"2026-06-02T10:0{i}:00+09:00" for i in range(5)]
+    )  # 10:00..10:04 닫힘
+    fresh = _page(
+        ["2026-06-02T10:05:00+09:00", "2026-06-02T10:06:00+09:00"]
+    )  # 끝=라이브
+    result, to_add, need_before = _merge_for_lookback(cached, fresh, lookback=4)
+    assert need_before is None
+    assert result[-1]["timestamp"] == "2026-06-02T10:06:00+09:00"  # 라이브가 마지막
+    assert len(result) == 4
+    assert to_add == [_bar("2026-06-02T10:05:00+09:00")]  # fresh 의 닫힌 봉만 신규
+
+
+def test_merge_live_bar_not_in_to_add() -> None:
+    _, to_add, _ = _merge_for_lookback(
+        [], _page(["2026-06-02T10:00:00+09:00", "2026-06-02T10:01:00+09:00"]), 10
+    )
+    assert [b["timestamp"] for b in to_add] == [
+        "2026-06-02T10:00:00+09:00"
+    ]  # 라이브(10:01) 제외
+
+
+def test_merge_insufficient_returns_oldest_need_before() -> None:
+    fresh = _page(["2026-06-02T10:05:00+09:00", "2026-06-02T10:06:00+09:00"])
+    result, _, need_before = _merge_for_lookback([], fresh, lookback=10)
+    assert (
+        need_before == "2026-06-02T10:05:00+09:00"
+    )  # 가장 오래된 보유 봉 기준 역fetch
+    assert len(result) == 2
+
+
+def test_merge_dedup_overlap() -> None:
+    cached = _page(["2026-06-02T10:00:00+09:00", "2026-06-02T10:01:00+09:00"])
+    fresh = _page(
+        ["2026-06-02T10:01:00+09:00", "2026-06-02T10:02:00+09:00"]
+    )  # 10:01 중복
+    result, _, _ = _merge_for_lookback(cached, fresh, lookback=10)
+    ts = [b["timestamp"] for b in result]
+    assert ts == sorted(set(ts))  # 중복 없음·정렬
+
+
+def test_merge_empty_fresh_serves_cache() -> None:
+    cached = _page(["2026-06-02T10:00:00+09:00"])
+    result, to_add, need_before = _merge_for_lookback(cached, [], lookback=1)
+    assert [b["timestamp"] for b in result] == ["2026-06-02T10:00:00+09:00"]
+    assert to_add == []
+    assert need_before is None
 
 
 # --- 마이크로구조 ---

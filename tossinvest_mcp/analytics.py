@@ -538,6 +538,33 @@ class CandleCache:
         self._calendar[market] = (payload, now)
 
 
+def _merge_for_lookback(
+    cached_closed: list[dict[str, Any]],
+    fresh_page: list[dict[str, Any]],
+    lookback: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+    """캐시된 닫힌 봉 + 방금 받은 최신 페이지로 (반환봉, 신규 캐시봉, 역fetch 기준시각) 계산.
+
+    fresh_page 의 마지막 원소는 라이브(진행 중) 봉으로 캐시하지 않는다. 반환봉 수가
+    lookback 에 못 미치면 need_before(가장 오래된 보유 봉 timestamp)로 역방향 추가 fetch
+    를 알린다. 순수 함수(네트워크 없음).
+    """
+    closed_fresh = fresh_page[:-1]
+    live = fresh_page[-1:]  # 0 또는 1개
+    seen = {c["timestamp"] for c in cached_closed}
+    closed_to_add = [c for c in closed_fresh if c["timestamp"] not in seen]
+    merged = {c["timestamp"]: c for c in cached_closed}
+    for c in closed_fresh:
+        merged[c["timestamp"]] = c
+    closed_sorted = sorted(merged.values(), key=lambda c: c["timestamp"])
+    available = closed_sorted + list(live)
+    result = available[-lookback:]
+    need_before = (
+        available[0]["timestamp"] if available and len(available) < lookback else None
+    )
+    return result, closed_to_add, need_before
+
+
 # --- fetch (httpx, 순수 계산과 분리) ------------------------------------------
 def _error_detail(resp: httpx.Response) -> str:
     """토스 에러 엔벨로프(ApiError{code,message,requestId})를 LLM 친화 메시지로.
