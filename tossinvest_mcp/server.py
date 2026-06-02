@@ -10,14 +10,21 @@ from __future__ import annotations
 import json
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.providers.openapi import MCPType, RouteMap
+from fastmcp.tools import Tool
+from mcp.types import ToolAnnotations
 
+from tossinvest_mcp.analytics import register_analytics
 from tossinvest_mcp.client import build_client
 from tossinvest_mcp.config import Settings
+from tossinvest_mcp.prompts import register_prompts
+
+if TYPE_CHECKING:
+    from fastmcp.utilities.openapi.models import HTTPRoute
 
 
 def _packaged_spec_path() -> Path:
@@ -40,6 +47,27 @@ def _route_maps(*, enable_trading: bool) -> list[RouteMap]:
     if not enable_trading:
         maps.append(_EXCLUDE_TRADING)
     return maps
+
+
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _annotate_component(route: HTTPRoute, component: object) -> None:
+    """생성된 각 툴에 MCP 행동 힌트를 부여한다(HTTP 메서드 기반, 스펙추적 0).
+
+    주석은 클라이언트가 참고하는 *힌트*(메타데이터 위생)일 뿐 강제 장치가 아니다.
+    실제 안전은 `enable_trading=False` 일 때 주문 툴을 아예 노출하지 않음으로 확보된다.
+    노출되는 비-GET 툴은 주문(생성/정정/취소)뿐이므로 메서드 판정으로 충분하다.
+    """
+    if not isinstance(component, Tool):  # 리소스/템플릿이면 스킵(현재는 전부 Tool)
+        return
+    read_only = route.method.upper() in _READ_METHODS
+    component.annotations = ToolAnnotations(
+        readOnlyHint=read_only,
+        destructiveHint=not read_only,  # 주문 POST(생성/정정/취소)는 파괴적
+        idempotentHint=read_only,  # GET 멱등 / 주문 POST 비멱등(이중주문 위험)
+        openWorldHint=True,  # 외부 토스 API/시장 상태와 상호작용
+    )
 
 
 def load_spec(path: Path | None = None) -> dict[str, Any]:
@@ -83,10 +111,14 @@ def build_server(
     enable_trading = settings.enable_trading if settings else False
     validate_output = settings.validate_output if settings else True
 
-    return FastMCP.from_openapi(
+    mcp = FastMCP.from_openapi(
         openapi_spec=spec,
         client=client,
         name="토스증권 MCP",
         route_maps=_route_maps(enable_trading=enable_trading),
+        mcp_component_fn=_annotate_component,
         validate_output=validate_output,
     )
+    register_prompts(mcp)
+    register_analytics(mcp, client)
+    return mcp
