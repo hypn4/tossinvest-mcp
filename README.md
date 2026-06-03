@@ -1,7 +1,14 @@
 # 토스증권 MCP
 
+[![PyPI](https://img.shields.io/pypi/v/tossinvest-mcp)](https://pypi.org/project/tossinvest-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/tossinvest-mcp)](https://pypi.org/project/tossinvest-mcp/)
+[![License](https://img.shields.io/github/license/hypn4/tossinvest-mcp)](LICENSE)
+[![CI](https://github.com/hypn4/tossinvest-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/hypn4/tossinvest-mcp/actions/workflows/ci.yml)
+
 토스증권 Open API를 [MCP](https://modelcontextprotocol.io) 도구로 노출하는 서버입니다.
-Claude 같은 AI 에이전트가 토스증권의 시세 조회·보유 종목·주문 기능을 도구로 사용할 수 있습니다.
+Claude 같은 AI 에이전트가 한국 주식(KRX) 시세·보유 종목·주문·기술적 분석을 도구로 사용할 수 있습니다.
+
+> **English** · MCP server exposing the Toss Securities (토스증권) Open API as tools — Korean stock market (KRX) quotes, holdings, order execution, and a session-aware technical-analysis dashboard (MACD/RSI/Bollinger/VWAP) — for Claude and other AI agents. Read-only by default; opt-in trading. (Korean docs below.)
 
 > **실거래 경고**: 주문 실행 툴은 실제 주문·실자금을 발생시킵니다.
 > 기본값은 **읽기 전용**이며, `TOSS_ENABLE_TRADING=true`일 때만 주문 실행 툴이 켜집니다.
