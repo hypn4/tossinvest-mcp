@@ -1,12 +1,29 @@
 [project]
 name = "tossinvest-mcp"
 dynamic = ["version"]
-description = "토스증권 Open API용 MCP 서버"
+description = "MCP server for Toss Securities (토스증권) Open API — Korean stock quotes, holdings, orders, technical analysis"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "hypn4", email = "khs951211@gmail.com" }]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
+keywords = [
+    "mcp", "model-context-protocol", "mcp-server", "fastmcp",
+    "toss-securities", "tossinvest", "토스증권",
+    "korean-stocks", "한국주식", "krx", "stock-market", "stock-api",
+    "claude", "ai-agent", "llm", "trading", "technical-analysis",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "fastmcp>=3.3.1",
     "httpx>=0.28.1",
@@ -17,6 +34,12 @@ dependencies = [
 
 [project.scripts]
 tossinvest-mcp = "tossinvest_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/hypn4/tossinvest-mcp"
+Repository = "https://github.com/hypn4/tossinvest-mcp"
+Issues = "https://github.com/hypn4/tossinvest-mcp/issues"
+Changelog = "https://github.com/hypn4/tossinvest-mcp/releases"
 
 [dependency-groups]
 dev = [
