@@ -76,5 +76,6 @@ uv run pytest -m "not e2e"
 
 ## 라이선스
 
-[Apache-2.0](LICENSE). 수정·재배포 시 저작권 고지와 [`NOTICE`](NOTICE)를 유지하고,
-수정한 파일에는 변경 사실을 명시해야 합니다(출처 표시 의무).
+[`Apache-2.0`](LICENSE)
+
+[`NOTICE`](NOTICE)
