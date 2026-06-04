@@ -1,7 +1,7 @@
 [project]
 name = "tossinvest-mcp"
 dynamic = ["version"]
-description = "MCP server for Toss Securities (토스증권) Open API — Korean stock quotes, holdings, orders, technical analysis"
+description = "MCP server for Toss Securities (토스증권) Open API: Korean stock quotes, holdings, orders, technical analysis"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "hypn4", email = "khs951211@gmail.com" }]

@@ -1,9 +1,9 @@
 토스증권 OpenAPI 는 제공하는 기능에 따라 다음 **네 가지 카테고리**로 분류됩니다.
 
-- **인증 (Auth)** — OAuth 2.0 토큰 발급
-- **시세·종목 정보 (Market Data · Stock Info · Market Info)** — 시세, 종목 마스터, 환율, 장 운영 시간
-- **계좌·자산 (Account · Asset)** — 계좌 목록 및 보유 주식 조회
-- **주문 (Order · Order History · Order Info)** — 주문 생성·정정·취소, 주문 조회, 거래 가능 정보
+- **인증 (Auth)**: OAuth 2.0 토큰 발급
+- **시세/종목 정보 (Market Data / Stock Info / Market Info)**: 시세, 종목 마스터, 환율, 장 운영 시간
+- **계좌/자산 (Account / Asset)**: 계좌 목록 및 보유 주식 조회
+- **주문 (Order / Order History / Order Info)**: 주문 생성/정정/취소, 주문 조회, 거래 가능 정보
 
 국내 및 미국 주식의 시세, 종목 정보, 환율, 장 운영 시간 등 시장 데이터를 조회할 수 있고, 본인 계좌의 보유 주식과 주문을 관리할 수 있습니다.
 
@@ -17,19 +17,19 @@
 
 - OAuth 2.0 액세스 토큰 발급 (Client Credentials Grant)
 
-### 시세·종목 정보
+### 시세/종목 정보
 
-종목·시장에 대해 모든 사용자에게 동일하게 제공되는 객관적 데이터입니다.
+종목/시장에 대해 모든 사용자에게 동일하게 제공되는 객관적 데이터입니다.
 
-- 시세 (현재가, 호가, 체결, 캔들 OHLCV, 상·하한가)
+- 시세 (현재가, 호가, 체결, 캔들 OHLCV, 상/하한가)
 - 종목 마스터 (종목명, 시장, 통화, 상장 상태, 발행주식수)
 - 매수 유의사항 (정리매매, 단기과열, 투자경고/위험, VI 발동, 신주인수권)
 - 환율 (KRW↔USD)
-- 장 운영 시간 (KRX·NXT 국내 캘린더, 미국 캘린더)
+- 장 운영 시간 (KRX/NXT 국내 캘린더, 미국 캘린더)
 
 사용자 계좌와 무관한 정보이므로 **OAuth 2.0 토큰만으로 호출 가능**합니다.
 
-### 계좌·자산
+### 계좌/자산
 
 본인 계좌의 자산 현황을 조회하는 API 입니다.
 
@@ -40,11 +40,11 @@
 
 본인 계좌의 매매를 다루는 API 입니다.
 
-- 주문 생성·정정·취소
+- 주문 생성/정정/취소
 - 주문 조회 (대기중 / 종료) 및 상세 조회
 - 매수 가능 금액, 판매 가능 수량, 매매 수수료 조회
 
-**계좌·자산** 및 **주문** 카테고리는 OAuth 2.0 토큰에 더해 **계좌 식별 헤더 `X-Tossinvest-Account`** 를 함께 전달해야 합니다.
+**계좌/자산** 및 **주문** 카테고리는 OAuth 2.0 토큰에 더해 **계좌 식별 헤더 `X-Tossinvest-Account`** 를 함께 전달해야 합니다.
 
 ### 연동 방식
 
@@ -56,15 +56,15 @@
 
 ### 인증
 
-#### Auth — OAuth 2.0
+#### Auth: OAuth 2.0
 
 | 엔드포인트 | 설명 |
 |------|------|
 | `POST /oauth2/token` | OAuth 2.0 액세스 토큰 발급 (Client Credentials Grant) |
 
-### 시세·종목 정보
+### 시세/종목 정보
 
-#### Market Data — 시세
+#### Market Data: 시세
 
 | 엔드포인트 | 설명 |
 |------|------|
@@ -72,69 +72,69 @@
 | `GET /api/v1/prices` | 현재가 조회 |
 | `GET /api/v1/trades` | 최근 체결 내역 조회 |
 | `GET /api/v1/price-limits` | 상/하한가 조회 |
-| `GET /api/v1/candles` | 캔들 차트 조회 (1분봉 · 일봉) |
+| `GET /api/v1/candles` | 캔들 차트 조회 (1분봉 / 일봉) |
 
-#### Stock Info — 종목 정보
+#### Stock Info: 종목 정보
 
 | 엔드포인트 | 설명 |
 |------|------|
 | `GET /api/v1/stocks` | 종목 기본 정보 조회 (symbol, 종목명, 시장, 통화, 상장 상태 등) |
 | `GET /api/v1/stocks/{symbol}/warnings` | 매수 유의사항 조회 (정리매매, 과열, 투자경고/위험, VI, 신주인수권) |
 
-#### Market Info — 환율·장 운영 시간
+#### Market Info: 환율/장 운영 시간
 
 | 엔드포인트 | 설명 |
 |------|------|
 | `GET /api/v1/exchange-rate` | KRW↔USD 환율 조회 |
-| `GET /api/v1/market-calendar/KR` | 국내 장 운영 정보 (KRX·NXT 세션별 시간) |
-| `GET /api/v1/market-calendar/US` | 해외 장 운영 정보 (데이마켓·프리·정규·애프터마켓) |
+| `GET /api/v1/market-calendar/KR` | 국내 장 운영 정보 (KRX/NXT 세션별 시간) |
+| `GET /api/v1/market-calendar/US` | 해외 장 운영 정보 (데이마켓/프리/정규/애프터마켓) |
 
-### 계좌·자산
+### 계좌/자산
 
-#### Account — 계좌
+#### Account: 계좌
 
 | 엔드포인트 | 설명 |
 |------|------|
 | `GET /api/v1/accounts` | 계좌 목록 조회 |
 
-#### Asset — 보유 자산
+#### Asset: 보유 자산
 
 | 엔드포인트 | 설명 |
 |------|------|
-| `GET /api/v1/holdings` | 보유 주식 조회 (종목별 상세 + 평가금액·손익 합산) |
+| `GET /api/v1/holdings` | 보유 주식 조회 (종목별 상세 + 평가금액/손익 합산) |
 
 ### 주문
 
-#### Order — 주문 (생성·정정·취소)
+#### Order: 주문 (생성/정정/취소)
 
 | 엔드포인트 | 설명 |
 |------|------|
-| `POST /api/v1/orders` | 주문 생성 (지정가·시장가 / KR·US) |
-| `POST /api/v1/orders/{orderId}/modify` | 주문 정정 (가격·수량) |
+| `POST /api/v1/orders` | 주문 생성 (지정가/시장가 / KR/US) |
+| `POST /api/v1/orders/{orderId}/modify` | 주문 정정 (가격/수량) |
 | `POST /api/v1/orders/{orderId}/cancel` | 주문 취소 |
 
-#### Order History — 주문 조회
+#### Order History: 주문 조회
 
 | 엔드포인트 | 설명 |
 |------|------|
 | `GET /api/v1/orders` | 주문 목록 조회 (대기중 주문) |
 | `GET /api/v1/orders/{orderId}` | 주문 상세 조회 (모든 상태) |
 
-#### Order Info — 거래 가능 정보
+#### Order Info: 거래 가능 정보
 
 | 엔드포인트 | 설명 |
 |------|------|
-| `GET /api/v1/buying-power` | 매수 가능 금액 조회 (현금 기반, KRW·USD) |
+| `GET /api/v1/buying-power` | 매수 가능 금액 조회 (현금 기반, KRW/USD) |
 | `GET /api/v1/sellable-quantity` | 판매 가능 수량 조회 |
-| `GET /api/v1/commissions` | 매매 수수료 조회 (KR·US 시장별) |
+| `GET /api/v1/commissions` | 매매 수수료 조회 (KR/US 시장별) |
 
 ---
 
 ## 시작하기
 
-1. **클라이언트 등록** — 토스증권 OpenAPI 콘솔에서 클라이언트를 등록하고 `client_id` 와 `client_secret` 을 발급받습니다.
-2. **액세스 토큰 발급** — `POST /oauth2/token` 으로 Client Credentials Grant 방식의 access token 을 발급받습니다.
-3. **API 호출** — 발급받은 토큰을 `Authorization: Bearer {access_token}` 헤더에 담아 호출합니다. **계좌·자산** 및 **주문** 카테고리는 `X-Tossinvest-Account: {accountSeq}` 헤더도 함께 전달합니다.
+1. **클라이언트 등록**: 토스증권 OpenAPI 콘솔에서 클라이언트를 등록하고 `client_id` 와 `client_secret` 을 발급받습니다.
+2. **액세스 토큰 발급**: `POST /oauth2/token` 으로 Client Credentials Grant 방식의 access token 을 발급받습니다.
+3. **API 호출**: 발급받은 토큰을 `Authorization: Bearer {access_token}` 헤더에 담아 호출합니다. **계좌/자산** 및 **주문** 카테고리는 `X-Tossinvest-Account: {accountSeq}` 헤더도 함께 전달합니다.
 
 ```bash
 # 1) 토큰 발급
@@ -144,11 +144,11 @@ curl -s -X POST 'https://openapi.tossinvest.com/oauth2/token' \
   -d 'client_id=xxx' \
   -d 'client_secret=yyy'
 
-# 2) 시세·종목 정보 (토큰만 필요)
+# 2) 시세/종목 정보 (토큰만 필요)
 curl -s 'https://openapi.tossinvest.com/api/v1/stocks?symbols=005930' \
   -H 'Authorization: Bearer eyJhbGciOi...'
 
-# 3) 계좌·자산 / 주문 (토큰 + 계좌 헤더)
+# 3) 계좌/자산 / 주문 (토큰 + 계좌 헤더)
 curl -s 'https://openapi.tossinvest.com/api/v1/holdings' \
   -H 'Authorization: Bearer eyJhbGciOi...' \
   -H 'X-Tossinvest-Account: 1'
@@ -214,7 +214,7 @@ curl -s 'https://openapi.tossinvest.com/api/v1/holdings' \
 }
 ```
 
-- `requestId` 는 응답 헤더 `X-Request-Id` 와 동일한 값이며 모든 응답(성공·실패) 에 포함됩니다. CS 문의 시 첨부를 권장합니다.
+- `requestId` 는 응답 헤더 `X-Request-Id` 와 동일한 값이며 모든 응답(성공/실패) 에 포함됩니다. CS 문의 시 첨부를 권장합니다.
 - `cf-ray` 는 응답 헤더로 모든 응답에 포함되는 CDN 엣지의 추적 식별자입니다 (예: `9ff7c9c6894aea9d-ICN`). 엣지에서 차단된 응답(`edge-blocked`, `edge-rate-limit-exceeded`) 의 경우 `X-Request-Id` 가 포함되지 않으므로, `cf-ray` 가 유일한 추적 식별자입니다. CS 문의 시 첨부를 권장합니다.
 - `code` 는 에러 코드 (예: `invalid-tick-size`, `order-not-found`, `invalid-token`) 입니다.
 - `message` 는 에러와 관련된 메시지 입니다.
@@ -222,7 +222,7 @@ curl -s 'https://openapi.tossinvest.com/api/v1/holdings' \
 
 | HTTP Status | 에러 코드 | 발생 이유 |
 |---|---|---|
-| 400 BAD_REQUEST | `invalid-request` | 요청이 유효하지 않습니다. 호가 유형·주문 방향·수량·금액·필수 파라미터 누락 등 다양한 사유가 있습니다. |
+| 400 BAD_REQUEST | `invalid-request` | 요청이 유효하지 않습니다. 호가 유형/주문 방향/수량/금액/필수 파라미터 누락 등 다양한 사유가 있습니다. |
 | 400 BAD_REQUEST | `confirm-high-value-required` | 주문 생성/정정 시 주문 금액이 1억원 이상인데 `confirmHighValueOrder` 가 `true` 가 아닙니다. |
 | 400 BAD_REQUEST | `closed-not-supported` | 주문 목록 조회에서 `status=CLOSED` 가 전달되었으나 현재 지원하지 않습니다. |
 | 400 BAD_REQUEST | `account-header-required` | `X-Tossinvest-Account` 헤더가 전달되지 않았습니다. |
@@ -247,7 +247,7 @@ curl -s 'https://openapi.tossinvest.com/api/v1/holdings' \
 | 422 UNPROCESSABLE_ENTITY | `price-out-of-range` | 주문 가격이 허용 범위(상/하한가)를 벗어났습니다. |
 | 422 UNPROCESSABLE_ENTITY | `opposite-pending-order-exists` | 동일 종목에 반대 방향의 체결 대기 주문이 존재합니다. |
 | 422 UNPROCESSABLE_ENTITY | `order-type-not-allowed` | 현재 사용할 수 없는 호가 유형입니다. |
-| 422 UNPROCESSABLE_ENTITY | `prerequisite-required` | 약관 동의·위험 고지 등 사전 자격 요건을 충족하지 않았습니다. |
+| 422 UNPROCESSABLE_ENTITY | `prerequisite-required` | 약관 동의/위험 고지 등 사전 자격 요건을 충족하지 않았습니다. |
 | 422 UNPROCESSABLE_ENTITY | `market-not-supported-for-stock` | 해당 종목은 요청 시장에서 거래할 수 없습니다. (KR) |
 | 422 UNPROCESSABLE_ENTITY | `investor-exchange-not-integrated` | 투자자지시 거래소 설정이 통합(SOR)이 아닙니다. (KR) |
 | 422 UNPROCESSABLE_ENTITY | `amount-order-outside-regular-hours` | 금액 주문은 정규장에만 가능합니다. (US) |

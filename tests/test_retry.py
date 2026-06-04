@@ -78,7 +78,7 @@ async def test_network_error_retried_for_get() -> None:
 
 
 async def test_network_error_NOT_retried_for_post() -> None:
-    """주문 POST 의 네트워크 오류·타임아웃은 재시도 금지(이중 주문 방지)."""
+    """주문 POST 의 네트워크 오류/타임아웃은 재시도 금지(이중 주문 방지)."""
     client, inner = _client([httpx.ReadTimeout("timeout"), 200])
     async with client:
         with pytest.raises(httpx.ReadTimeout):

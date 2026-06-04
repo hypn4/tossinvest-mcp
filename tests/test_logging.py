@@ -1,4 +1,4 @@
-"""로깅 구성 검증 — stdio 프로토콜 보호.
+"""로깅 구성 검증: stdio 프로토콜 보호.
 
 stdout 은 JSON-RPC 채널이므로 로그가 stdout 으로 새면 프로토콜이 깨진다.
 또한 우리 로거만 건드려 httpx/httpcore 가 DEBUG 로 토큰을 흘리지 않게 한다.

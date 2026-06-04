@@ -1,4 +1,4 @@
-"""ClientCredentialsAuth 단위 테스트 — httpx mock 으로 발급/캐시/갱신/재귀없음 검증."""
+"""ClientCredentialsAuth 단위 테스트: httpx mock 으로 발급/캐시/갱신/재귀없음 검증."""
 
 from __future__ import annotations
 

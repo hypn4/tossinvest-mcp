@@ -1,4 +1,4 @@
-"""환경설정 — `.env` 또는 환경변수(`TOSS_` 접두사)에서 로드."""
+"""환경설정: `.env` 또는 환경변수(`TOSS_` 접두사)에서 로드."""
 
 from __future__ import annotations
 
@@ -64,6 +64,6 @@ class Settings(BaseSettings):
     # --- 캐시 ---
     cache_db_path: str | None = Field(
         default=None,
-        description="설정 시 닫힌 봉·시장 캘린더를 SQLite 파일에 보존해 서버 재시작 후에도 재사용한다"
+        description="설정 시 닫힌 봉/시장 캘린더를 SQLite 파일에 보존해 서버 재시작 후에도 재사용한다"
         "(rate-limit 완화). 미설정이면 인메모리(세션 한정, 현행). 토큰 사용량과는 무관.",
     )

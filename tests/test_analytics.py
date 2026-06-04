@@ -1,4 +1,4 @@
-"""분석 함수 단위 테스트 — 네트워크 없음(순수 함수).
+"""분석 함수 단위 테스트: 네트워크 없음(순수 함수).
 
 핵심: **고정 기대값 오라클**. RSI/MACD/ATR/MFI 의 기대값은 권위 출처(TA-Lib 0.6.x)로 한 번 산출해
 상수로 박았다(개발 중 `uv run --with TA-Lib --no-project` 일회성 사용, pyproject 엔 미포함).
@@ -53,7 +53,7 @@ def _series() -> list[dict[str, Any]]:
     return out
 
 
-# TA-Lib(권위 출처)로 산출한 고정 기대값 — 동일 시리즈 마지막 봉 기준
+# TA-Lib(권위 출처)로 산출한 고정 기대값: 동일 시리즈 마지막 봉 기준
 ORACLE_RSI14 = 73.44633
 ORACLE_ATR14 = 4.721327
 ORACLE_MACD = (3.711828, 2.582479, 1.12935)  # macd, signal, histogram
@@ -62,7 +62,7 @@ ORACLE_MFI14 = 59.862705
 
 def test_rsi_matches_talib_oracle() -> None:
     d = compute_indicators(_series())
-    # 정확 일치(Wilder 평활) — 타이트한 허용오차
+    # 정확 일치(Wilder 평활): 타이트한 허용오차
     assert abs(d["momentum"]["rsi"] - ORACLE_RSI14) <= 0.05
 
 
@@ -270,7 +270,7 @@ def test_session_bars_threshold_20min_no_split_40min_split() -> None:
     assert len(_session_bars(base + [bar("2026-06-02T09:42:00+09:00")])) == 1  # 40분 갭
 
 
-# --- 정규장 캘린더 앵커(US 24h 거래 — 갭 휴리스틱이 못 잡는 경우) ---
+# --- 정규장 캘린더 앵커(US 24h 거래: 갭 휴리스틱이 못 잡는 경우) ---
 _CAL = {
     "previousBusinessDay": {
         "regularMarket": {
@@ -700,7 +700,7 @@ def test_merge_dedup_overlap() -> None:
     )  # 10:01 중복, 끝=라이브
     result, to_add, _ = _merge_for_lookback(cached, fresh, lookback=10)
     ts = [b["timestamp"] for b in result]
-    assert ts == sorted(set(ts))  # 중복 없음·정렬
+    assert ts == sorted(set(ts))  # 중복 없음/정렬
     assert ts == [
         "2026-06-02T10:00:00+09:00",
         "2026-06-02T10:01:00+09:00",
@@ -865,7 +865,7 @@ async def test_fetch_candles_cached_refreshes_live_bar() -> None:
         await client.aclose()
 
     assert r1[-1]["close"] == 100.0
-    assert r2[-1]["close"] == 200.0  # 라이브 봉은 매번 신선 — 캐시 stale 아님
+    assert r2[-1]["close"] == 200.0  # 라이브 봉은 매번 신선: 캐시 stale 아님
 
 
 async def test_fetch_candles_cached_grows_lookback_across_calls() -> None:
@@ -1276,7 +1276,7 @@ def test_candle_cache_persists_closed_bars_across_instances(tmp_path: Any) -> No
     bars = [_cbar(f"2026-06-02T22:3{i}:00+09:00", close=10.0 + i) for i in range(3)]
     c1 = CandleCache(db_path=db)
     c1.extend_candles("AAPL", "1m", bars)
-    c2 = CandleCache(db_path=db)  # 재시작 시뮬 — 디스크에서 로드
+    c2 = CandleCache(db_path=db)  # 재시작 시뮬: 디스크에서 로드
     assert c2.get_candles("AAPL", "1m") == bars
 
 
@@ -1348,7 +1348,7 @@ async def test_fetch_candles_cached_invalidates_on_readjustment(tmp_path: Any) -
             _cbar("2026-06-02T22:31:00+09:00", close=10.0),
         ],
     )
-    cache = CandleCache(db_path=db)  # 새 세션 — 디스크에서 로드
+    cache = CandleCache(db_path=db)  # 새 세션: 디스크에서 로드
 
     def row(ts: str) -> dict[str, Any]:
         return {
@@ -1371,7 +1371,7 @@ async def test_fetch_candles_cached_invalidates_on_readjustment(tmp_path: Any) -
                     }
                 },
             )
-        # 최신 페이지 — 같은 ts 를 재조정값(close 5, 저장된 10과 불일치)으로 + 라이브봉
+        # 최신 페이지: 같은 ts 를 재조정값(close 5, 저장된 10과 불일치)으로 + 라이브봉
         return httpx.Response(
             200,
             json={

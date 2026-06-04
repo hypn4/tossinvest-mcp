@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 def _packaged_spec_path() -> Path:
-    """패키지에 포함된 spec/openapi.json 경로(editable·wheel 모두 동작)."""
+    """패키지에 포함된 spec/openapi.json 경로(editable/wheel 모두 동작)."""
     return Path(str(files("tossinvest_mcp").joinpath("spec", "openapi.json")))
 
 

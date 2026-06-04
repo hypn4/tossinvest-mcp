@@ -1,4 +1,4 @@
-"""인증·기본 헤더·재시도가 설정된 httpx.AsyncClient 생성."""
+"""인증/기본 헤더/재시도가 설정된 httpx.AsyncClient 생성."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""시세·종목 데이터 기반 기술적 지표·신호 분석 툴.
+"""시세/종목 데이터 기반 기술적 지표/신호 분석 툴.
 
 talipp(순수 파이썬, 의존성 0)로 표준 기술적 지표를 계산하고, talipp 에 없는 MFI 하나만
 자체 구현한다. 계산(순수 함수)과 fetch(httpx) 를 분리해 순수 함수는 네트워크 없이 단위 테스트한다.
@@ -55,7 +55,7 @@ _SYMBOL = Annotated[
 
 _CANDLE_KEYS = ("openPrice", "highPrice", "lowPrice", "closePrice", "volume")
 
-# 1분봉 분석이 한 거래 세션 사이클 전체를 덮도록 가져올 봉 수. analyze_indicators(1m)·
+# 1분봉 분석이 한 거래 세션 사이클 전체를 덮도록 가져올 봉 수. analyze_indicators(1m)/
 # intraday_vwap 가 공유한다. 1500봉(≈25h)이면 US 한 사이클(데이 09:00→애프터 08:50≈1430분)을
 # 덮어, 네 세션 중 무엇을 골라도 직전 인스턴스를 온전히 잡는다(닫힌 봉은 캐시로 상쇄).
 _INTRADAY_BARS = 1500
@@ -295,7 +295,7 @@ def compute_indicators(candles: list[dict[str, Any]]) -> dict[str, Any]:
             "period_high": _r(max(highs)),
             "period_low": _r(min(lows)),
         },
-        "note": "지표 값 대시보드. 추세/매매 판단(호재·악재 포함)은 해석 단계(LLM)에서. 부족 지표는 null.",
+        "note": "지표 값 대시보드. 추세/매매 판단(호재/악재 포함)은 해석 단계(LLM)에서. 부족 지표는 null.",
     }
 
 
@@ -368,7 +368,7 @@ def _select_session(
 
 
 def _session_windows(calendar: Any) -> list[dict[str, str]]:
-    """캘린더 → 세션 인스턴스 [{name,start,end}] (start 오름차순). 결측·null 세션 제외.
+    """캘린더 → 세션 인스턴스 [{name,start,end}] (start 오름차순). 결측/null 세션 제외.
 
     US 4 세션(dayMarket/preMarket/regularMarket/afterMarket)을 previous/today/next 영업일에서
     모아 정렬한다. 순수 함수(네트워크 없음).
@@ -443,7 +443,7 @@ def session_context(
     session_start: str | None = None,
     session_end: str | None = None,
 ) -> dict[str, Any] | None:
-    """현재 세션 봉만으로 장중 고저·세션 시작을 요약한다(1분봉 지표 대시보드 보강).
+    """현재 세션 봉만으로 장중 고저/세션 시작을 요약한다(1분봉 지표 대시보드 보강).
 
     session_start 가 주어지면 그 이후(US 정규장 캘린더 앵커), 없으면 갭 휴리스틱(KR).
     session_end(ISO) 가 주어지면 [session_start, session_end) 구간으로 앵커(상한 없으면 현행).
@@ -486,7 +486,7 @@ def _trade_flow(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "down_volume": _r(down, 2),
         "up_ratio": _r(up / total, 3) if total else None,
         "sample": len(rows),
-        "note": "최근 ≤50건 표본 — 약한 프록시",
+        "note": "최근 ≤50건 표본: 약한 프록시",
     }
 
 
@@ -545,7 +545,7 @@ def summarize_microstructure(
     return facts
 
 
-# --- 캔들·캘린더 캐시 (rate-limit 완화; 닫힌 봉·캘린더만, 라이브는 항상 신선) ------
+# --- 캔들/캘린더 캐시 (rate-limit 완화; 닫힌 봉/캘린더만, 라이브는 항상 신선) ------
 # 기본은 인메모리 dict(휘발성). db_path 설정 시 SQLite 파일에 영속(opt-in, 아래 CandleCache).
 _MAX_PAGES = 10  # 캐시 역방향 페이지네이션 가드(200*10=2000봉)
 _CANDLE_RETENTION = 7 * 86400.0  # 디스크 보존창(초). 이보다 오래 미재조회된 봉은 prune.
@@ -561,9 +561,9 @@ CREATE TABLE IF NOT EXISTS calendar(market TEXT PRIMARY KEY, payload TEXT, fetch
 
 
 class _SqliteStore:
-    """닫힌 봉·캘린더의 SQLite 영속 저장소(stdlib sqlite3, 의존성 0).
+    """닫힌 봉/캘린더의 SQLite 영속 저장소(stdlib sqlite3, 의존성 0).
 
-    CandleCache 의 파일 모드에서만 쓰인다. 동기 호출·단일 장수 연결이며 모든 SQL/직렬화/prune
+    CandleCache 의 파일 모드에서만 쓰인다. 동기 호출/단일 장수 연결이며 모든 SQL/직렬화/prune
     를 여기 가둔다(파일 모드 신규 실패 모드 격리). 손상 파일이면 __init__ 에서 예외 → 호출자 폴백.
     """
 
@@ -617,7 +617,7 @@ class _SqliteStore:
                 for b in bars
             ],
         )
-        # 절대 기준 prune(상대 축출 금지 — 다중 프로세스 경합 회피)
+        # 절대 기준 prune(상대 축출 금지: 다중 프로세스 경합 회피)
         self._conn.execute(
             "DELETE FROM candles WHERE fetched_at < ?", (now - self._retention,)
         )
@@ -654,9 +654,9 @@ class CandleCache:
     닫힌 봉은 불변이라 누적 보관하고, 라이브 봉은 캐시하지 않는다(호출자가 매번 신선
     fetch). 캘린더는 market 별 TTL. 단일 사용자 세션 기준이라 동시성 보호는 두지 않는다.
 
-    기본은 인메모리 dict(휘발성, 현행). db_path 가 주어지면(opt-in) 닫힌 봉·캘린더를 SQLite
+    기본은 인메모리 dict(휘발성, 현행). db_path 가 주어지면(opt-in) 닫힌 봉/캘린더를 SQLite
     파일에 write-through 하고 최초 접근 시 로드해 재시작 후에도 재사용한다. dict 가 인프로세스
-    단일 진실원(핫 패스)이고 SQLite 는 영속 사이드카다. 연결/스키마 실패·손상 시 로그 후 인메모리로
+    단일 진실원(핫 패스)이고 SQLite 는 영속 사이드카다. 연결/스키마 실패/손상 시 로그 후 인메모리로
     폴백한다(분석은 절대 막지 않음). 캘린더 TTL 은 wall-clock(`now` 주입) 기준이라 재시작 후에도 유효.
     """
 
@@ -677,7 +677,7 @@ class CandleCache:
         if db_path is not None:
             try:
                 self._store = _SqliteStore(db_path, retention_seconds)
-            except Exception as exc:  # 손상·권한 등 → 인메모리 폴백
+            except Exception as exc:  # 손상/권한 등 → 인메모리 폴백
                 logger.warning("캔들 캐시 SQLite 비활성(인메모리 폴백): %s", exc)
                 self._store = None
 
@@ -713,7 +713,7 @@ class CandleCache:
                 logger.warning("캔들 캐시 영속 실패(%s/%s): %s", symbol, interval, exc)
 
     def invalidate(self, symbol: str, interval: str) -> None:
-        """해당 시리즈를 인메모리·디스크에서 폐기(조정가격 재조정 감지 시)."""
+        """해당 시리즈를 인메모리/디스크에서 폐기(조정가격 재조정 감지 시)."""
         self._candles.pop((symbol, interval), None)
         if self._store is not None:
             try:
@@ -781,14 +781,14 @@ def _overlap_consistent(
     조정가격(split/dividend) 소급 재조정 감지용. True=겹침+일치(조정 기준 동일 → 캐시 신뢰),
     False=겹침+불일치(재조정 → 캐시 폐기), None=겹침 없음(검증 불가, 보통 교차일 갭 → 캐시 폐기).
     순수 함수. 영속 캐시가 조정 전 옛 봉을 새 조정 최신 페이지와 병합해 지표를 오염시키는 것을 막는다.
-    OHLC 를 프록시로 쓴다(가격은 그대로고 거래량만 재산정되는 드문 경우는 못 잡음 — VWAP 만 영향).
-    인메모리·파일 모드 모두에 적용돼, 겹침 없는 드문 경우의 비연속 윈도도 함께 정리한다(부수 효과).
+    OHLC 를 프록시로 쓴다(가격은 그대로고 거래량만 재산정되는 드문 경우는 못 잡음: VWAP 만 영향).
+    인메모리/파일 모드 모두에 적용돼, 겹침 없는 드문 경우의 비연속 윈도도 함께 정리한다(부수 효과).
     """
     if not cached_closed or not fresh_page:
         return None
     fresh_by_ts = {
         c["timestamp"]: c for c in fresh_page[:-1]
-    }  # 라이브(마지막) 봉 제외 — 닫힌 봉만 비교
+    }  # 라이브(마지막) 봉 제외: 닫힌 봉만 비교
     for c in reversed(cached_closed):
         f = fresh_by_ts.get(c["timestamp"])
         if f is not None:
@@ -887,9 +887,9 @@ async def _fetch_candles_cached(
             return [], None
         return parse_candles(res.get("candles", [])), res.get("nextBefore")
 
-    fresh, cursor = await page(None)  # 최신 페이지 — 항상 신선
+    fresh, cursor = await page(None)  # 최신 페이지: 항상 신선
     cached = cache.get_candles(symbol, interval)
-    # fresh 가 비면(일시적 빈 응답) 검증·병합 대상이 없으므로 캐시를 폐기하지 않고 그대로 서빙한다.
+    # fresh 가 비면(일시적 빈 응답) 검증/병합 대상이 없으므로 캐시를 폐기하지 않고 그대로 서빙한다.
     if cached and fresh and _overlap_consistent(cached, fresh) is not True:
         # 조정가격 재조정(가격 불연속) 또는 검증 불가(겹침 없음) → 캐시 폐기 후 fresh 기준 재구성
         cache.invalidate(symbol, interval)
@@ -919,7 +919,7 @@ async def _session_anchor(
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """선택 세션 윈도를 시장 캘린더로 해석한다 → (start, end, name, active_name).
 
-    US 종목만 캘린더 앵커. KR(6자리 숫자)·결측·호출 실패 시 (None,None,None,None) → 호출자가 갭
+    US 종목만 캘린더 앵커. KR(6자리 숫자)/결측/호출 실패 시 (None,None,None,None) → 호출자가 갭
     휴리스틱으로 폴백한다. cache 주입 시 market 별 TTL 로 캘린더를 재사용한다.
     """
     if not candles or symbol.isdigit():  # KR 6자리 숫자는 갭 휴리스틱
@@ -949,7 +949,7 @@ def register_analytics(
 ) -> None:
     """계산형 분석 툴을 서버에 등록한다(모두 읽기 전용, 항상 노출).
 
-    db_path 가 주어지면 캔들·캘린더 캐시를 SQLite 파일에 영속한다(opt-in, rate-limit 완화).
+    db_path 가 주어지면 캔들/캘린더 캐시를 SQLite 파일에 영속한다(opt-in, rate-limit 완화).
     """
     cache = CandleCache(db_path=db_path)
 
@@ -960,7 +960,7 @@ def register_analytics(
             Literal["1m", "1d"],
             Field(
                 description="봉 단위: 1d=일봉(중기 추세), "
-                "1m=분봉(장중, 세션 앵커 — 당일 세션 전체를 덮어 분석)."
+                "1m=분봉(장중, 세션 앵커: 당일 세션 전체를 덮어 분석)."
             ),
         ] = "1d",
         lookback: Annotated[
@@ -982,12 +982,12 @@ def register_analytics(
             ),
         ] = "auto",
     ) -> dict[str, Any]:
-        """기술적 지표 대시보드(EMA·MACD·ADX·SuperTrend·RSI·Stochastic·Bollinger·ATR·OBV·MFI 등).
+        """기술적 지표 대시보드(EMA/MACD/ADX/SuperTrend/RSI/Stochastic/Bollinger/ATR/OBV/MFI 등).
 
         가격/거래량을 정확히 계산해 값으로 반환하며, 매매 판단은 하지 않는다(해석은 호출자).
 
-        interval=1m 은 당일 세션 전체를 가져와 분석하고 `session`(session_start·
-        bars_in_session·session_high·session_low·session_complete)을 함께 반환한다.
+        interval=1m 은 당일 세션 전체를 가져와 분석하고 `session`(session_start/
+        bars_in_session/session_high/session_low/session_complete)을 함께 반환한다.
         US 는 거의 24h 연속 거래라 갭으로 세션을 못 가르므로 시장 캘린더의 정규장 시작을
         앵커하고(KR 은 야간 갭 휴리스틱), session_complete=False 면 윈도가 정규장 시작까지
         못 닿아 고저가 불완전함을 뜻한다. 표준 관례대로 지표 자체는 세션마다 리셋하지 않는
@@ -1081,11 +1081,11 @@ def register_analytics(
     async def get_market_signals(symbol: _SYMBOL) -> dict[str, Any]:
         """호재/악재 판단에 쓰는 **데이터 파생 신호 사실 대시보드**(점수화하지 않음).
 
-        경고(투자위험/경고/과열/정리매매)·KR 거래정지·상하한가 근접·호가 불균형·체결 흐름·거래량 급증을
+        경고(투자위험/경고/과열/정리매매)/KR 거래정지/상하한가 근접/호가 불균형/체결 흐름/거래량 급증을
         구조화해 반환한다. 호재/악재 분류는 호출자(LLM)가 한다. 뉴스가 아니다.
 
         부분 실패 내성: 7개 엔드포인트를 병렬 호출하고, 일부가 실패해도 성공한 신호만 모아 반환하며
-        실패 항목은 `unavailable` 에 표기한다(US/KR 엔드포인트 거동 차이·일시 오류에 강건).
+        실패 항목은 `unavailable` 에 표기한다(US/KR 엔드포인트 거동 차이/일시 오류에 강건).
         """
         results = await asyncio.gather(
             _result(client, f"/api/v1/stocks/{symbol}/warnings"),
